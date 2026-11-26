@@ -77,18 +77,27 @@ jobs:
             exit 1
           fi
 
-      - name: Create temporary debug keystore
+      - name: Create or restore debug keystore
         shell: bash
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           KEYSTORE_PATH="./debug.keystore"
+          KEYTOOL_BIN="keytool"
+          if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
+            KEYTOOL_BIN="${JAVA_HOME}/bin/keytool"
+          fi
+
           if [ -f "$KEYSTORE_PATH" ]; then
-            echo "Temporary debug keystore already exists; skipping generation."
+            echo "Debug keystore already exists; skipping generation."
+          elif [ -n "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+            echo "Restored debug keystore from DEBUG_KEYSTORE_BASE64 secret."
+          elif [ -f "./debug.keystore.base64" ]; then
+            base64 -d ./debug.keystore.base64 > "$KEYSTORE_PATH"
+            echo "Restored debug keystore from debug.keystore.base64."
           else
-            KEYTOOL_BIN="keytool"
-            if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
-              KEYTOOL_BIN="${JAVA_HOME}/bin/keytool"
-            fi
             if ! "$KEYTOOL_BIN" -genkeypair \
               -noprompt \
               -keystore "$KEYSTORE_PATH" \
@@ -105,10 +114,11 @@ jobs:
           fi
 
           if [ ! -f "$KEYSTORE_PATH" ] || [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "::error::Temporary debug keystore is missing or empty after creation check."
+            echo "::error::Debug keystore is missing or empty after setup."
             exit 1
           fi
-          echo "Temporary debug keystore is ready."
+          echo "Debug keystore is ready. Signing fingerprints:"
+          "$KEYTOOL_BIN" -list -v -keystore "$KEYSTORE_PATH" -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
 
       - name: Build debug APK
         shell: bash

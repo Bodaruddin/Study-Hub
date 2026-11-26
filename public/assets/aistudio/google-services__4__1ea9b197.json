@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "758202582485",
+    "project_id": "studyhub-f64b2",
+    "storage_bucket": "studyhub-f64b2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:758202582485:android:221eac6b018fdd0c6ba95c",
+        "android_client_info": {
+          "package_name": "com.aistudio.studyhub.kxpvqr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "758202582485-tfn4c31ss7g1m8p0vbcu31vdc9ei8aro.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyZ_TAcaEL1c1xyPlrmxCWhQyolJpmxkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "758202582485-tfn4c31ss7g1m8p0vbcu31vdc9ei8aro.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:758202582485:android:8daf4c4ec5dfa66b6ba95c",
+        "android_client_info": {
+          "package_name": "com.bodaruddin.studyhub"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "758202582485-tfn4c31ss7g1m8p0vbcu31vdc9ei8aro.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyZ_TAcaEL1c1xyPlrmxCWhQyolJpmxkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "758202582485-tfn4c31ss7g1m8p0vbcu31vdc9ei8aro.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
