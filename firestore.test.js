@@ -266,3 +266,55 @@ test("Email spoofing defense & curriculum access rules", async () => {
   // Verified admin can list all including drafts
   await assertSucceeds(realAdminDb.collection("study_materials").get());
 });
+
+test("Admin can manage app_settings with Ad Management fields while students can only read published settings", async () => {
+  const realAdminDb = testEnv.authenticatedContext(ADMIN_UID, {
+    email: ADMIN_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const studentDb = testEnv.authenticatedContext(STUDENT_A, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const ts = pastDate();
+
+  await assertSucceeds(
+    realAdminDb.collection("app_settings").doc("global").set({
+      premiumMonthlyPrice: "$4.99/mo",
+      premiumYearlyPrice: "$39.99/yr",
+      adsEnabled: true,
+      adFamilySafeMode: true,
+      adPlacementHome: true,
+      adPlacementMaterials: true,
+      adPlacementQuizzes: false,
+      adPlacementPapers: true,
+      adBannerTitle: "StudyHub Plus • Family-Safe Learning",
+      adBannerSubtitle: "Unlock unlimited offline packs, advanced analytics & ad-free mode.",
+      adCtaLabel: "Upgrade",
+      adNetworkProvider: "StudyHub Direct (Family-Safe)",
+      maintenanceMode: false,
+      supportEmail: "support@studyhub.edu",
+      published: true,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    realAdminDb.collection("app_settings").doc("global").update({
+      adsEnabled: false,
+      adPlacementQuizzes: true,
+      adBannerTitle: "Ad-Free Scholarship Week",
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  await assertSucceeds(studentDb.collection("app_settings").where("published", "==", true).get());
+  await assertFails(
+    studentDb.collection("app_settings").doc("global").update({
+      adsEnabled: false,
+      updatedAt: pastDate(1000),
+    })
+  );
+});
+

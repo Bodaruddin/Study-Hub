@@ -223,6 +223,15 @@ service cloud.firestore {
       return data.premiumMonthlyPrice is string && data.premiumMonthlyPrice.size() >= 1 && data.premiumMonthlyPrice.size() <= 30 &&
         data.premiumYearlyPrice is string && data.premiumYearlyPrice.size() >= 1 && data.premiumYearlyPrice.size() <= 30 &&
         data.adsEnabled is bool &&
+        (!('adFamilySafeMode' in data) || data.adFamilySafeMode is bool) &&
+        (!('adPlacementHome' in data) || data.adPlacementHome is bool) &&
+        (!('adPlacementMaterials' in data) || data.adPlacementMaterials is bool) &&
+        (!('adPlacementQuizzes' in data) || data.adPlacementQuizzes is bool) &&
+        (!('adPlacementPapers' in data) || data.adPlacementPapers is bool) &&
+        (!('adBannerTitle' in data) || (data.adBannerTitle is string && data.adBannerTitle.size() >= 1 && data.adBannerTitle.size() <= 120)) &&
+        (!('adBannerSubtitle' in data) || (data.adBannerSubtitle is string && data.adBannerSubtitle.size() >= 1 && data.adBannerSubtitle.size() <= 240)) &&
+        (!('adCtaLabel' in data) || (data.adCtaLabel is string && data.adCtaLabel.size() >= 1 && data.adCtaLabel.size() <= 30)) &&
+        (!('adNetworkProvider' in data) || (data.adNetworkProvider is string && data.adNetworkProvider.size() >= 1 && data.adNetworkProvider.size() <= 60)) &&
         data.maintenanceMode is bool &&
         data.supportEmail is string && data.supportEmail.size() >= 3 && data.supportEmail.size() <= 120 &&
         data.published is bool &&
@@ -444,12 +453,12 @@ service cloud.firestore {
       allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
       allow create: if isAdmin() && isValidId(settingId) &&
         incoming().keys().hasAll(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'createdAt', 'updatedAt']) &&
-        incoming().keys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'adFamilySafeMode', 'adPlacementHome', 'adPlacementMaterials', 'adPlacementQuizzes', 'adPlacementPapers', 'adBannerTitle', 'adBannerSubtitle', 'adCtaLabel', 'adNetworkProvider', 'maintenanceMode', 'supportEmail', 'published', 'createdAt', 'updatedAt']) &&
         isValidAppSettings(incoming());
       allow update: if isAdmin() && isValidId(settingId) &&
         isValidAppSettings(incoming()) &&
         incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'adFamilySafeMode', 'adPlacementHome', 'adPlacementMaterials', 'adPlacementQuizzes', 'adPlacementPapers', 'adBannerTitle', 'adBannerSubtitle', 'adCtaLabel', 'adNetworkProvider', 'maintenanceMode', 'supportEmail', 'published', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(settingId);
     }
   }

@@ -57,8 +57,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.AppSettings
 import com.example.data.model.ExamPaper
 import com.example.data.model.PaperCategory
+import com.example.ui.components.EthicalAdFreeUpgradeBanner
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.ElectricPurple
@@ -73,7 +75,10 @@ fun ExamPapersScreen(
     onToggleDownloadPaper: (ExamPaper) -> Unit,
     onSelectClass: (Long) -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    appSettings: AppSettings = AppSettings(),
+    isPremiumUser: Boolean = false,
+    onOpenPremium: () -> Unit = {}
 ) {
     var selectedCategory by remember { mutableStateOf(PaperCategory.PREVIOUS_YEAR) }
     var filterMenuOpen by remember { mutableStateOf(false) }
@@ -395,6 +400,18 @@ fun ExamPapersScreen(
                         )
                     }
                 }
+            }
+
+            item {
+                EthicalAdFreeUpgradeBanner(
+                    adsEnabled = appSettings.adsEnabled && appSettings.adPlacementPapers,
+                    isPremium = isPremiumUser,
+                    onUpgradeClick = onOpenPremium,
+                    title = appSettings.adBannerTitle,
+                    subtitle = appSettings.adBannerSubtitle,
+                    ctaLabel = appSettings.adCtaLabel,
+                    familySafeMode = appSettings.adFamilySafeMode
+                )
             }
         }
     }

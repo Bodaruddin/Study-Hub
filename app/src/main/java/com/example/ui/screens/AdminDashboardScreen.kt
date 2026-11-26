@@ -124,6 +124,10 @@ import com.example.ui.theme.TealEnd
 import com.example.ui.theme.TealStart
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.rounded.AdsClick
+import androidx.compose.material.icons.rounded.Storage
+import com.example.data.model.SyncStatus
+
 enum class AdminModule(val label: String) {
     DASHBOARD("Dashboard"),
     CLASSES("Manage Classes"),
@@ -135,8 +139,27 @@ enum class AdminModule(val label: String) {
     STUDENTS("Manage Students"),
     ANNOUNCEMENTS("Announcements"),
     ANALYTICS("Platform Analytics"),
+    DATABASE("Manage Database"),
+    ADS("Manage Ads"),
     SETTINGS("App Settings"),
     SUPPORT("Reports & Support")
+}
+
+private fun AdminModule.drawerIcon(): ImageVector = when (this) {
+    AdminModule.DASHBOARD -> Icons.Rounded.Dashboard
+    AdminModule.CLASSES -> Icons.Rounded.School
+    AdminModule.SUBJECTS -> Icons.Rounded.AutoStories
+    AdminModule.CHAPTERS -> Icons.Rounded.MenuBook
+    AdminModule.MATERIALS -> Icons.Rounded.CloudUpload
+    AdminModule.QUIZZES -> Icons.Rounded.Quiz
+    AdminModule.PAPERS -> Icons.Rounded.Description
+    AdminModule.STUDENTS -> Icons.Rounded.Group
+    AdminModule.ANNOUNCEMENTS -> Icons.Rounded.Campaign
+    AdminModule.ANALYTICS -> Icons.Rounded.Analytics
+    AdminModule.DATABASE -> Icons.Rounded.Storage
+    AdminModule.ADS -> Icons.Rounded.AdsClick
+    AdminModule.SETTINGS -> Icons.Rounded.Settings
+    AdminModule.SUPPORT -> Icons.Rounded.HeadsetMic
 }
 
 @Composable
@@ -152,6 +175,9 @@ fun AdminShellScreen(
     announcements: List<AnnouncementItem>,
     adminUsers: List<UserProfile>,
     appSettings: AppSettings,
+    syncStatus: SyncStatus,
+    pendingSyncCount: Int,
+    isDatabaseBusy: Boolean,
     onSaveClass: (SchoolClass, Boolean) -> Unit,
     onDeleteClass: (String) -> Unit,
     onSaveSubject: (SubjectItem, Boolean) -> Unit,
@@ -164,6 +190,10 @@ fun AdminShellScreen(
     onSaveExamPaper: (ExamPaper, Boolean) -> Unit,
     onSendAnnouncement: (String, String, Long, String) -> Unit,
     onSaveAppSettings: (AppSettings) -> Unit,
+    onSyncCloudNow: () -> Unit,
+    onSeedMissingCloud: () -> Unit,
+    onFlushSyncQueue: () -> Unit,
+    onResetLocalCache: () -> Unit,
     onSwitchToStudentView: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -260,6 +290,13 @@ fun AdminShellScreen(
                     }
                     AdminModule.entries.forEach { mod ->
                         NavigationDrawerItem(
+                            icon = {
+                                Icon(
+                                    imageVector = mod.drawerIcon(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
                             label = { Text(mod.label) },
                             selected = activeModule == mod,
                             onClick = {
@@ -277,9 +314,13 @@ fun AdminShellScreen(
                             colors = NavigationDrawerItemDefaults.colors(
                                 selectedContainerColor = ElectricPurple.copy(alpha = 0.28f),
                                 selectedTextColor = Color.White,
-                                unselectedTextColor = Color(0xFFC5CEF0)
+                                selectedIconColor = Color.White,
+                                unselectedTextColor = Color(0xFFC5CEF0),
+                                unselectedIconColor = Color(0xFF9AA5D1)
                             ),
-                            modifier = Modifier.padding(horizontal = 10.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 10.dp)
+                                .testTag("admin_drawer_${mod.name.lowercase()}")
                         )
                     }
                     Spacer(modifier = Modifier.height(10.dp))
@@ -354,11 +395,15 @@ fun AdminShellScreen(
                         announcements = announcements,
                         adminUsers = adminUsers,
                         appSettings = appSettings,
+                        syncStatus = syncStatus,
+                        pendingSyncCount = pendingSyncCount,
+                        isDatabaseBusy = isDatabaseBusy,
                         onBackToDashboard = {
                             activeModule = AdminModule.DASHBOARD
                             activeBottomTab = 0
                         },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onNavigateModule = { target -> activeModule = target },
                         onOpenAddClass = { showAddClassDialog = true },
                         onDeleteClass = onDeleteClass,
                         onOpenAddSubject = { showAddSubjectDialog = true },
@@ -371,6 +416,10 @@ fun AdminShellScreen(
                         onSaveExamPaper = onSaveExamPaper,
                         onOpenAnnouncementDialog = { showAnnouncementDialog = true },
                         onSaveAppSettings = onSaveAppSettings,
+                        onSyncCloudNow = onSyncCloudNow,
+                        onSeedMissingCloud = onSeedMissingCloud,
+                        onFlushSyncQueue = onFlushSyncQueue,
+                        onResetLocalCache = onResetLocalCache,
                         onSwitchToStudent = onSwitchToStudentView
                     )
                 }

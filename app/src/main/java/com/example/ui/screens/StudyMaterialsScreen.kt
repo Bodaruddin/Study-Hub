@@ -67,10 +67,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.AppSettings
 import com.example.data.model.ChapterItem
 import com.example.data.model.MaterialType
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
+import com.example.ui.components.EthicalAdFreeUpgradeBanner
 import com.example.ui.components.SubjectIconBadge
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.BlueStart
@@ -97,7 +99,8 @@ fun StudyMaterialsScreen(
     onOpenPremium: () -> Unit,
     onOpenGlobalSearch: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    appSettings: AppSettings = AppSettings()
 ) {
     var activeSubject by remember(initialSubject) { mutableStateOf(initialSubject) }
     var activeChapter by remember { mutableStateOf<ChapterItem?>(null) }
@@ -599,6 +602,17 @@ fun StudyMaterialsScreen(
                                 modifier = Modifier.weight(1f)
                             )
                         }
+                    }
+                    item {
+                        EthicalAdFreeUpgradeBanner(
+                            adsEnabled = appSettings.adsEnabled && appSettings.adPlacementMaterials,
+                            isPremium = isPremiumUser,
+                            onUpgradeClick = onOpenPremium,
+                            title = appSettings.adBannerTitle,
+                            subtitle = appSettings.adBannerSubtitle,
+                            ctaLabel = appSettings.adCtaLabel,
+                            familySafeMode = appSettings.adFamilySafeMode
+                        )
                     }
                 }
             }

@@ -762,6 +762,91 @@ class StudyHubRepository(
         }
     }
 
+    suspend fun seedOrRepairCloudCurriculum(): Result<Int> {
+        return try {
+            requireUserId()
+            var createdCount = 0
+
+            val existingClasses = db.collection("classes").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.classes.filter { it.id !in existingClasses }.forEach { c ->
+                db.collection("classes").document(c.id).set(c.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val existingSubjects = db.collection("subjects").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.subjects.filter { it.id !in existingSubjects }.forEach { s ->
+                db.collection("subjects").document(s.id).set(s.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val existingChapters = db.collection("chapters").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.chapters.filter { it.id !in existingChapters }.forEach { ch ->
+                db.collection("chapters").document(ch.id).set(ch.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val existingMaterials = db.collection("study_materials").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.materials.filter { it.id !in existingMaterials }.forEach { m ->
+                db.collection("study_materials").document(m.id).set(m.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val existingQuizzes = db.collection("quizzes").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.quizzes.filter { it.id !in existingQuizzes }.forEach { q ->
+                db.collection("quizzes").document(q.id).set(q.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val questionsByQuiz = SeedCurriculumData.questions.groupBy { it.quizId }
+            questionsByQuiz.forEach { (quizId, qs) ->
+                val existingQs = db.collection("quizzes").document(quizId).collection("questions")
+                    .get().await().documents.map { it.id }.toSet()
+                qs.filter { it.id !in existingQs }.forEach { qq ->
+                    db.collection("quizzes").document(quizId).collection("questions")
+                        .document(qq.id).set(qq.toDomain().toWriteMap(true)).await()
+                    createdCount++
+                }
+            }
+
+            val existingPapers = db.collection("exam_papers").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.examPapers.filter { it.id !in existingPapers }.forEach { ep ->
+                db.collection("exam_papers").document(ep.id).set(ep.toDomain().toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val existingAnnouncements = db.collection("announcements").get().await().documents.map { it.id }.toSet()
+            SeedCurriculumData.defaultAnnouncements.filter { it.id !in existingAnnouncements }.forEach { ann ->
+                db.collection("announcements").document(ann.id).set(ann.toWriteMap(true)).await()
+                createdCount++
+            }
+
+            val settingsRef = db.collection("app_settings").document("global")
+            if (!settingsRef.get().await().exists()) {
+                settingsRef.set(SeedCurriculumData.defaultAppSettings.toWriteMap(true)).await()
+                createdCount++
+            }
+
+            Result.success(createdCount)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "repair_curriculum")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun resetLocalCacheAndResync(isAdmin: Boolean): Result<Unit> {
+        return try {
+            dao.clearCurriculumCache()
+            ensureLocalSeedData()
+            syncCurriculumFromCloud(isAdmin)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun saveSchoolClass(item: SchoolClass, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "class_${item.grade}" }
         return try {

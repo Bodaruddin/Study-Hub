@@ -412,6 +412,15 @@ data class AppSettings(
     val premiumMonthlyPrice: String = "$4.99/mo",
     val premiumYearlyPrice: String = "$39.99/yr",
     val adsEnabled: Boolean = true,
+    val adFamilySafeMode: Boolean = true,
+    val adPlacementHome: Boolean = true,
+    val adPlacementMaterials: Boolean = true,
+    val adPlacementQuizzes: Boolean = false,
+    val adPlacementPapers: Boolean = true,
+    val adBannerTitle: String = "StudyHub Plus • Family-Safe Learning",
+    val adBannerSubtitle: String = "Unlock unlimited offline packs, advanced analytics & ad-free mode.",
+    val adCtaLabel: String = "Upgrade",
+    val adNetworkProvider: String = "StudyHub Direct (Family-Safe)",
     val maintenanceMode: Boolean = false,
     val supportEmail: String = "support@studyhub.edu",
     val published: Boolean = true,
@@ -419,11 +428,20 @@ data class AppSettings(
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun toWriteMap(isCreate: Boolean): Map<String, Any> = buildMap {
-        put("premiumMonthlyPrice", premiumMonthlyPrice.take(30))
-        put("premiumYearlyPrice", premiumYearlyPrice.take(30))
+        put("premiumMonthlyPrice", premiumMonthlyPrice.trim().take(30).ifBlank { "$4.99/mo" })
+        put("premiumYearlyPrice", premiumYearlyPrice.trim().take(30).ifBlank { "$39.99/yr" })
         put("adsEnabled", adsEnabled)
+        put("adFamilySafeMode", adFamilySafeMode)
+        put("adPlacementHome", adPlacementHome)
+        put("adPlacementMaterials", adPlacementMaterials)
+        put("adPlacementQuizzes", adPlacementQuizzes)
+        put("adPlacementPapers", adPlacementPapers)
+        put("adBannerTitle", adBannerTitle.trim().take(120).ifBlank { "StudyHub Plus • Family-Safe Learning" })
+        put("adBannerSubtitle", adBannerSubtitle.trim().take(240).ifBlank { "Unlock unlimited offline packs, advanced analytics & ad-free mode." })
+        put("adCtaLabel", adCtaLabel.trim().take(30).ifBlank { "Upgrade" })
+        put("adNetworkProvider", adNetworkProvider.trim().take(60).ifBlank { "StudyHub Direct (Family-Safe)" })
         put("maintenanceMode", maintenanceMode)
-        put("supportEmail", supportEmail.take(120))
+        put("supportEmail", supportEmail.trim().take(120).ifBlank { "support@studyhub.edu" })
         put("published", published)
         if (isCreate) put("createdAt", FieldValue.serverTimestamp())
         put("updatedAt", FieldValue.serverTimestamp())

@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -738,7 +739,11 @@ fun EthicalAdFreeUpgradeBanner(
     adsEnabled: Boolean,
     isPremium: Boolean,
     onUpgradeClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    title: String = "StudyHub Plus • Family-Safe Learning",
+    subtitle: String = "Unlock unlimited offline packs, advanced analytics & ad-free mode.",
+    ctaLabel: String = "Upgrade",
+    familySafeMode: Boolean = true
 ) {
     if (!adsEnabled || isPremium) return
     Surface(
@@ -770,20 +775,42 @@ fun EthicalAdFreeUpgradeBanner(
             }
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title.ifBlank { "StudyHub Plus • Family-Safe Learning" },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (familySafeMode) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = SuccessGreen.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = "AD",
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SuccessGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
                 Text(
-                    text = "StudyHub Plus • Family-Safe Learning",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Unlock unlimited offline packs, advanced analytics & ad-free mode.",
+                    text = subtitle.ifBlank { "Unlock unlimited offline packs, advanced analytics & ad-free mode." },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Upgrade",
+                text = ctaLabel.ifBlank { "Upgrade" },
                 style = MaterialTheme.typography.labelMedium,
                 color = ElectricPurple,
                 fontWeight = FontWeight.Bold

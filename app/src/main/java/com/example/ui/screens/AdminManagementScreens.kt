@@ -72,6 +72,7 @@ import com.example.data.model.QuizQuestion
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
+import com.example.data.model.SyncStatus
 import com.example.data.model.UserProfile
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.DangerRed
@@ -100,8 +101,12 @@ fun AdminSubmoduleScaffold(
     announcements: List<AnnouncementItem>,
     adminUsers: List<UserProfile>,
     appSettings: AppSettings,
+    syncStatus: SyncStatus,
+    pendingSyncCount: Int,
+    isDatabaseBusy: Boolean,
     onBackToDashboard: () -> Unit,
     onOpenDrawer: () -> Unit,
+    onNavigateModule: (AdminModule) -> Unit,
     onOpenAddClass: () -> Unit,
     onDeleteClass: (String) -> Unit,
     onOpenAddSubject: () -> Unit,
@@ -114,6 +119,10 @@ fun AdminSubmoduleScaffold(
     onSaveExamPaper: (ExamPaper, Boolean) -> Unit,
     onOpenAnnouncementDialog: () -> Unit,
     onSaveAppSettings: (AppSettings) -> Unit,
+    onSyncCloudNow: () -> Unit,
+    onSeedMissingCloud: () -> Unit,
+    onFlushSyncQueue: () -> Unit,
+    onResetLocalCache: () -> Unit,
     onSwitchToStudent: () -> Unit
 ) {
     BackHandler { onBackToDashboard() }
@@ -510,6 +519,30 @@ fun AdminSubmoduleScaffold(
                     }
                 }
 
+                AdminModule.DATABASE -> adminManageDatabaseItems(
+                    classes = classes,
+                    subjects = subjects,
+                    chapters = chapters,
+                    materials = materials,
+                    quizzes = quizzes,
+                    questions = questions,
+                    examPapers = examPapers,
+                    announcements = announcements,
+                    adminUsers = adminUsers,
+                    syncStatus = syncStatus,
+                    pendingSyncCount = pendingSyncCount,
+                    isDatabaseBusy = isDatabaseBusy,
+                    onSyncCloudNow = onSyncCloudNow,
+                    onSeedMissingCloud = onSeedMissingCloud,
+                    onFlushSyncQueue = onFlushSyncQueue,
+                    onResetLocalCache = onResetLocalCache
+                )
+
+                AdminModule.ADS -> adminManageAdsItems(
+                    appSettings = appSettings,
+                    onSaveAppSettings = onSaveAppSettings
+                )
+
                 AdminModule.SETTINGS -> {
                     item {
                         var monthly by remember(appSettings) { mutableStateOf(appSettings.premiumMonthlyPrice) }
@@ -547,6 +580,20 @@ fun AdminSubmoduleScaffold(
                                 Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                                     Text("Maintenance Mode", color = Color.White)
                                     Switch(checked = maint, onCheckedChange = { maint = it })
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(
+                                        onClick = { onNavigateModule(AdminModule.ADS) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Manage Ads →", color = Color(0xFFC5A6FF), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onNavigateModule(AdminModule.DATABASE) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Manage DB →", color = Color(0xFFC5A6FF), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                                 Tactile3DCard(
                                     faceBrush = Brush.linearGradient(listOf(PurpleStart, PurpleEnd)),

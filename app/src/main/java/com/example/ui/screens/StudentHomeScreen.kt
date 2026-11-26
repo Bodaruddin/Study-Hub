@@ -1318,9 +1318,13 @@ fun StudentHomeScreen(
         // Ethical non-intrusive upgrade / ad-free slot
         item {
             EthicalAdFreeUpgradeBanner(
-                adsEnabled = appSettings.adsEnabled,
+                adsEnabled = appSettings.adsEnabled && appSettings.adPlacementHome,
                 isPremium = profile.subscriptionTier == "premium",
                 onUpgradeClick = onOpenPremium,
+                title = appSettings.adBannerTitle,
+                subtitle = appSettings.adBannerSubtitle,
+                ctaLabel = appSettings.adCtaLabel,
+                familySafeMode = appSettings.adFamilySafeMode,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
             )
         }

@@ -93,6 +93,9 @@ class StudyHubViewModel(
     private val _activeQuiz = MutableStateFlow<ActiveQuizState?>(null)
     val activeQuiz: StateFlow<ActiveQuizState?> = _activeQuiz.asStateFlow()
 
+    private val _isDatabaseBusy = MutableStateFlow(false)
+    val isDatabaseBusy: StateFlow<Boolean> = _isDatabaseBusy.asStateFlow()
+
     private var timerJob: Job? = null
 
     val isOnline: StateFlow<Boolean> = syncManager.isOnline
@@ -581,6 +584,83 @@ class StudyHubViewModel(
             repository.saveAppSettings(settings)
                 .onSuccess { _snackbarMessage.value = "Settings updated" }
                 .onFailure { _snackbarMessage.value = it.message ?: "Failed to update settings" }
+        }
+    }
+
+    fun syncCloudDatabaseNow() {
+        if (_isDatabaseBusy.value) return
+        viewModelScope.launch {
+            _isDatabaseBusy.value = true
+            try {
+                syncManager.flushPendingSync(currentUserId)
+                val res = repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+                loadAdminUsers()
+                res.onSuccess {
+                    _snackbarMessage.value = "Cloud database synced to local cache"
+                }.onFailure {
+                    _snackbarMessage.value = it.message ?: "Cloud sync failed"
+                }
+            } finally {
+                _isDatabaseBusy.value = false
+            }
+        }
+    }
+
+    fun seedMissingCloudData() {
+        if (_isDatabaseBusy.value) return
+        viewModelScope.launch {
+            _isDatabaseBusy.value = true
+            try {
+                repository.ensureLocalSeedData()
+                val res = repository.seedOrRepairCloudCurriculum()
+                repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+                res.onSuccess { count ->
+                    _snackbarMessage.value = if (count > 0) {
+                        "Seeded $count missing cloud record(s)"
+                    } else {
+                        "Cloud database already contains all default curriculum"
+                    }
+                }.onFailure {
+                    _snackbarMessage.value = it.message ?: "Cloud seed failed"
+                }
+            } finally {
+                _isDatabaseBusy.value = false
+            }
+        }
+    }
+
+    fun resetLocalCacheAndResync() {
+        if (_isDatabaseBusy.value) return
+        viewModelScope.launch {
+            _isDatabaseBusy.value = true
+            try {
+                val res = repository.resetLocalCacheAndResync(isAuthorizedAdmin)
+                res.onSuccess {
+                    _snackbarMessage.value = "Local cache reset and re-synced from Cloud"
+                }.onFailure {
+                    _snackbarMessage.value = it.message ?: "Cache reset failed"
+                }
+            } finally {
+                _isDatabaseBusy.value = false
+            }
+        }
+    }
+
+    fun flushPendingSyncQueue() {
+        if (_isDatabaseBusy.value) return
+        viewModelScope.launch {
+            _isDatabaseBusy.value = true
+            try {
+                syncManager.flushPendingSync(currentUserId)
+                    .onSuccess { count ->
+                        _snackbarMessage.value = if (count > 0) "Flushed $count queued sync item(s)" else "Sync queue is already empty"
+                    }
+                    .onFailure {
+                        _snackbarMessage.value = it.message ?: "Flush sync failed"
+                    }
+            } finally {
+                _isDatabaseBusy.value = false
+            }
         }
     }
 

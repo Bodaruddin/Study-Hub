@@ -200,6 +200,7 @@ private fun StudyHubApp() {
         val adminUsers by viewModel.adminUsers.collectAsStateWithLifecycle()
         val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
         val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+        val isDatabaseBusy by viewModel.isDatabaseBusy.collectAsStateWithLifecycle()
 
         val snackbarHostState = remember { SnackbarHostState() }
         LaunchedEffect(snackbarMessage) {
@@ -227,6 +228,9 @@ private fun StudyHubApp() {
                         announcements = announcements,
                         adminUsers = adminUsers,
                         appSettings = appSettings,
+                        syncStatus = syncStatus,
+                        pendingSyncCount = pendingSyncCount,
+                        isDatabaseBusy = isDatabaseBusy,
                         onSaveClass = viewModel::saveSchoolClass,
                         onDeleteClass = viewModel::deleteSchoolClass,
                         onSaveSubject = viewModel::saveSubject,
@@ -239,6 +243,10 @@ private fun StudyHubApp() {
                         onSaveExamPaper = viewModel::saveExamPaper,
                         onSendAnnouncement = viewModel::sendAnnouncement,
                         onSaveAppSettings = viewModel::saveAppSettings,
+                        onSyncCloudNow = viewModel::syncCloudDatabaseNow,
+                        onSeedMissingCloud = viewModel::seedMissingCloudData,
+                        onFlushSyncQueue = viewModel::flushPendingSyncQueue,
+                        onResetLocalCache = viewModel::resetLocalCacheAndResync,
                         onSwitchToStudentView = { viewModel.setAdminMode(false) }
                     )
                 } else {
@@ -357,7 +365,10 @@ private fun StudentShellScreen(
                     downloadedPaperIds = downloadedPaperIds,
                     onToggleDownloadPaper = viewModel::toggleExamPaperDownload,
                     onSelectClass = viewModel::updateSelectedClass,
-                    onBack = { subRoute = null }
+                    onBack = { subRoute = null },
+                    appSettings = appSettings,
+                    isPremiumUser = isPremiumUser,
+                    onOpenPremium = { subRoute = StudentSubRoute.PREMIUM }
                 )
 
                 StudentSubRoute.NOTIFICATIONS -> NotificationsScreen(
@@ -458,7 +469,8 @@ private fun StudentShellScreen(
                             studyInitialSubject = null
                             studyInitialMaterial = null
                             selectedTab = 0
-                        }
+                        },
+                        appSettings = appSettings
                     )
 
                     2 -> QuizScreen(
@@ -475,7 +487,10 @@ private fun StudentShellScreen(
                         onPreviousQuestion = viewModel::previousQuestion,
                         onSubmitQuiz = viewModel::submitQuiz,
                         onCloseQuiz = viewModel::closeQuiz,
-                        isQuestionCorrect = viewModel::isQuestionCorrect
+                        isQuestionCorrect = viewModel::isQuestionCorrect,
+                        appSettings = appSettings,
+                        isPremiumUser = isPremiumUser,
+                        onOpenPremium = { subRoute = StudentSubRoute.PREMIUM }
                     )
 
                     3 -> LibraryScreen(

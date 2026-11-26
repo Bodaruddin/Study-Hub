@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -148,4 +149,36 @@ interface StudyHubDao {
 
     @Query("DELETE FROM pending_sync_queue WHERE userId = :userId")
     suspend fun clearUserPendingSync(userId: String)
+
+    @Query("DELETE FROM cached_classes")
+    suspend fun clearCachedClasses()
+
+    @Query("DELETE FROM cached_subjects")
+    suspend fun clearCachedSubjects()
+
+    @Query("DELETE FROM cached_chapters")
+    suspend fun clearCachedChapters()
+
+    @Query("DELETE FROM cached_materials")
+    suspend fun clearCachedMaterials()
+
+    @Query("DELETE FROM cached_quizzes")
+    suspend fun clearCachedQuizzes()
+
+    @Query("DELETE FROM cached_questions")
+    suspend fun clearCachedQuestions()
+
+    @Query("DELETE FROM cached_exam_papers")
+    suspend fun clearCachedExamPapers()
+
+    @Transaction
+    suspend fun clearCurriculumCache() {
+        clearCachedClasses()
+        clearCachedSubjects()
+        clearCachedChapters()
+        clearCachedMaterials()
+        clearCachedQuizzes()
+        clearCachedQuestions()
+        clearCachedExamPapers()
+    }
 }

@@ -67,11 +67,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.AppSettings
 import com.example.data.model.QuestionType
 import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizItem
 import com.example.data.model.QuizQuestion
 import com.example.ui.components.CircularProgressRing
+import com.example.ui.components.EthicalAdFreeUpgradeBanner
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.BlueStart
 import com.example.ui.theme.DangerRed
@@ -103,7 +105,10 @@ fun QuizScreen(
     onSubmitQuiz: () -> Unit,
     onCloseQuiz: () -> Unit,
     isQuestionCorrect: (ActiveQuizState, QuizQuestion) -> Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    appSettings: AppSettings = AppSettings(),
+    isPremiumUser: Boolean = false,
+    onOpenPremium: () -> Unit = {}
 ) {
     if (activeQuiz != null) {
         BackHandler { onCloseQuiz() }
@@ -408,6 +413,17 @@ fun QuizScreen(
                             }
                         }
                     }
+                }
+                item {
+                    EthicalAdFreeUpgradeBanner(
+                        adsEnabled = appSettings.adsEnabled && appSettings.adPlacementQuizzes,
+                        isPremium = isPremiumUser,
+                        onUpgradeClick = onOpenPremium,
+                        title = appSettings.adBannerTitle,
+                        subtitle = appSettings.adBannerSubtitle,
+                        ctaLabel = appSettings.adCtaLabel,
+                        familySafeMode = appSettings.adFamilySafeMode
+                    )
                 }
             }
         }
