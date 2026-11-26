@@ -1,0 +1,456 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isVerifiedBootstrapAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email in ['momrooja@gmail.com', 'abced6917@gmail.com'];
+    }
+
+    function isAdmin() {
+      return isVerifiedBootstrapAdmin() ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // Entity validators
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+        data.selectedClass is int && data.selectedClass >= 6 && data.selectedClass <= 12 &&
+        data.role in ['student', 'admin'] &&
+        data.subscriptionTier in ['free', 'premium'] &&
+        data.avgScore is int && data.avgScore >= 0 && data.avgScore <= 100 &&
+        data.dayStreak is int && data.dayStreak >= 0 && data.dayStreak <= 10000 &&
+        data.points is int && data.points >= 0 && data.points <= 10000000 &&
+        data.dailyGoalCount is int && data.dailyGoalCount >= 1 && data.dailyGoalCount <= 50 &&
+        data.dailyCompletedCount is int && data.dailyCompletedCount >= 0 && data.dailyCompletedCount <= 100 &&
+        data.darkThemeEnabled is bool &&
+        data.notificationsEnabled is bool &&
+        data.examRemindersEnabled is bool &&
+        data.newMaterialsEnabled is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBookmark(data) {
+      return data.materialId is string && data.materialId.size() >= 1 && data.materialId.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.materialType is string && data.materialType.size() >= 1 && data.materialType.size() <= 60 &&
+        data.subtitle is string && data.subtitle.size() <= 160 &&
+        data.accentKey is string && data.accentKey.size() >= 1 && data.accentKey.size() <= 40 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidQuizAttempt(data) {
+      return data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128 &&
+        data.quizTitle is string && data.quizTitle.size() >= 1 && data.quizTitle.size() <= 180 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.mode in ['practice', 'exam'] &&
+        data.totalQuestions is int && data.totalQuestions >= 1 && data.totalQuestions <= 200 &&
+        data.correctAnswers is int && data.correctAnswers >= 0 && data.correctAnswers <= data.totalQuestions &&
+        data.scorePercent is int && data.scorePercent >= 0 && data.scorePercent <= 100 &&
+        data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 86400 &&
+        data.pointsEarned is int && data.pointsEarned >= 0 && data.pointsEarned <= 5000 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidReadingProgress(data) {
+      return data.materialId is string && data.materialId.size() >= 1 && data.materialId.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.chapterTitle is string && data.chapterTitle.size() >= 1 && data.chapterTitle.size() <= 180 &&
+        data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.progressPercent is int && data.progressPercent >= 0 && data.progressPercent <= 100 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidDownloadRecord(data) {
+      return data.materialId is string && data.materialId.size() >= 1 && data.materialId.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.fileSizeLabel is string && data.fileSizeLabel.size() >= 1 && data.fileSizeLabel.size() <= 40 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidSchoolClass(data) {
+      return data.grade is int && data.grade >= 6 && data.grade <= 12 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.description is string && data.description.size() <= 300 &&
+        data.studentCount is int && data.studentCount >= 0 && data.studentCount <= 10000000 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidSubject(data) {
+      return data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.subtitle is string && data.subtitle.size() <= 140 &&
+        data.iconKey is string && data.iconKey.size() >= 1 && data.iconKey.size() <= 40 &&
+        data.colorKey is string && data.colorKey.size() >= 1 && data.colorKey.size() <= 40 &&
+        data.chapterCount is int && data.chapterCount >= 0 && data.chapterCount <= 200 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidChapter(data) {
+      return data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.subjectId is string && data.subjectId.size() >= 1 && data.subjectId.size() <= 128 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.chapterNumber is int && data.chapterNumber >= 1 && data.chapterNumber <= 200 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.summary is string && data.summary.size() <= 1000 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidStudyMaterial(data) {
+      return data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.subjectId is string && data.subjectId.size() >= 1 && data.subjectId.size() <= 128 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.chapterId is string && data.chapterId.size() >= 1 && data.chapterId.size() <= 128 &&
+        data.chapterTitle is string && data.chapterTitle.size() >= 1 && data.chapterTitle.size() <= 180 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.materialType in ['short_notes', 'detailed_notes', 'chapter_summary', 'qa_set', 'important_questions', 'pdf_guide', 'text_lesson', 'image_lesson', 'revision_notes', 'study_guide', 'mind_map'] &&
+        data.contentMarkdown is string && data.contentMarkdown.size() >= 1 && data.contentMarkdown.size() <= 30000 &&
+        data.fileSizeLabel is string && data.fileSizeLabel.size() <= 40 &&
+        data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string) &&
+        data.important is bool &&
+        data.premiumOnly is bool &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidQuiz(data) {
+      return data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.subjectId is string && data.subjectId.size() >= 1 && data.subjectId.size() <= 128 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.chapterId is string && data.chapterId.size() >= 1 && data.chapterId.size() <= 128 &&
+        data.chapterTitle is string && data.chapterTitle.size() >= 1 && data.chapterTitle.size() <= 180 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.description is string && data.description.size() <= 500 &&
+        data.durationMinutes is int && data.durationMinutes >= 1 && data.durationMinutes <= 240 &&
+        data.questionCount is int && data.questionCount >= 0 && data.questionCount <= 200 &&
+        data.premiumOnly is bool &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidQuizQuestion(data) {
+      return data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128 &&
+        data.questionType in ['mcq', 'multi_select', 'true_false', 'fill_blank'] &&
+        data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1000 &&
+        data.options is list && data.options.size() <= 6 && (data.options.size() == 0 || data.options[0] is string) &&
+        data.correctIndices is list && data.correctIndices.size() <= 6 && (data.correctIndices.size() == 0 || data.correctIndices[0] is int) &&
+        data.correctText is string && data.correctText.size() <= 200 &&
+        data.explanation is string && data.explanation.size() <= 1000 &&
+        data.points is int && data.points >= 1 && data.points <= 100 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidExamPaper(data) {
+      return data.classGrade is int && data.classGrade >= 6 && data.classGrade <= 12 &&
+        data.subjectId is string && data.subjectId.size() >= 1 && data.subjectId.size() <= 128 &&
+        data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.paperCategory in ['previous_year', 'model_paper', 'sample_paper', 'important_questions'] &&
+        data.year is int && data.year >= 2000 && data.year <= 2035 &&
+        data.fileSizeLabel is string && data.fileSizeLabel.size() >= 1 && data.fileSizeLabel.size() <= 40 &&
+        data.contentText is string && data.contentText.size() >= 1 && data.contentText.size() <= 30000 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAnnouncement(data) {
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 1000 &&
+        data.targetClass is int && data.targetClass >= 0 && data.targetClass <= 12 &&
+        data.priority in ['normal', 'high'] &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAppSettings(data) {
+      return data.premiumMonthlyPrice is string && data.premiumMonthlyPrice.size() >= 1 && data.premiumMonthlyPrice.size() <= 30 &&
+        data.premiumYearlyPrice is string && data.premiumYearlyPrice.size() >= 1 && data.premiumYearlyPrice.size() <= 30 &&
+        data.adsEnabled is bool &&
+        data.maintenanceMode is bool &&
+        data.supportEmail is string && data.supportEmail.size() >= 3 && data.supportEmail.size() <= 120 &&
+        data.published is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    // Trusted Admin Registry
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isVerifiedBootstrapAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(userId);
+    }
+
+    // User Profiles & Private Subcollections
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isVerifiedBootstrapAdmin();
+
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        isOwner(userId) &&
+        incoming().userId == request.auth.uid &&
+        (incoming().role == 'student' || (incoming().role == 'admin' && isAdmin())) &&
+        (incoming().subscriptionTier == 'free' || isAdmin()) &&
+        incoming().keys().hasAll(['userId', 'displayName', 'selectedClass', 'role', 'subscriptionTier', 'avgScore', 'dayStreak', 'points', 'dailyGoalCount', 'dailyCompletedCount', 'darkThemeEnabled', 'notificationsEnabled', 'examRemindersEnabled', 'newMaterialsEnabled', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['userId', 'displayName', 'email', 'selectedClass', 'role', 'subscriptionTier', 'avgScore', 'dayStreak', 'points', 'dailyGoalCount', 'dailyCompletedCount', 'darkThemeEnabled', 'notificationsEnabled', 'examRemindersEnabled', 'newMaterialsEnabled', 'createdAt', 'updatedAt']) &&
+        isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          (isOwner(userId) &&
+           incoming().role == existing().role &&
+           incoming().subscriptionTier == existing().subscriptionTier &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'selectedClass', 'avgScore', 'dayStreak', 'points', 'dailyGoalCount', 'dailyCompletedCount', 'darkThemeEnabled', 'notificationsEnabled', 'examRemindersEnabled', 'newMaterialsEnabled', 'updatedAt']))
+          || isAdmin()
+        );
+
+      allow delete: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      match /bookmarks/{bookmarkId} {
+        allow get: if isOwner(userId) && isValidId(bookmarkId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(bookmarkId) &&
+          incoming().keys().hasAll(['materialId', 'title', 'subjectName', 'classGrade', 'materialType', 'subtitle', 'accentKey', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['materialId', 'title', 'subjectName', 'classGrade', 'materialType', 'subtitle', 'accentKey', 'createdAt', 'updatedAt']) &&
+          isValidBookmark(incoming());
+        allow update: if isOwner(userId) && isValidId(bookmarkId) &&
+          isValidBookmark(incoming()) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['materialId', 'title', 'subjectName', 'classGrade', 'materialType', 'subtitle', 'accentKey', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(bookmarkId);
+      }
+
+      match /quiz_attempts/{attemptId} {
+        allow get: if isOwner(userId) && isValidId(attemptId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(attemptId) &&
+          incoming().keys().hasAll(['quizId', 'quizTitle', 'subjectName', 'classGrade', 'mode', 'totalQuestions', 'correctAnswers', 'scorePercent', 'durationSeconds', 'pointsEarned', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['quizId', 'quizTitle', 'subjectName', 'classGrade', 'mode', 'totalQuestions', 'correctAnswers', 'scorePercent', 'durationSeconds', 'pointsEarned', 'createdAt', 'updatedAt']) &&
+          isValidQuizAttempt(incoming());
+        allow update: if isOwner(userId) && isValidId(attemptId) &&
+          isValidQuizAttempt(incoming()) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['scorePercent', 'correctAnswers', 'durationSeconds', 'pointsEarned', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(attemptId);
+      }
+
+      match /reading_progress/{progressId} {
+        allow get: if isOwner(userId) && isValidId(progressId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(progressId) &&
+          incoming().keys().hasAll(['materialId', 'title', 'subjectName', 'chapterTitle', 'classGrade', 'progressPercent', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['materialId', 'title', 'subjectName', 'chapterTitle', 'classGrade', 'progressPercent', 'createdAt', 'updatedAt']) &&
+          isValidReadingProgress(incoming());
+        allow update: if isOwner(userId) && isValidId(progressId) &&
+          isValidReadingProgress(incoming()) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'subjectName', 'chapterTitle', 'classGrade', 'progressPercent', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(progressId);
+      }
+
+      match /downloads/{downloadId} {
+        allow get: if isOwner(userId) && isValidId(downloadId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(downloadId) &&
+          incoming().keys().hasAll(['materialId', 'title', 'subjectName', 'classGrade', 'fileSizeLabel', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['materialId', 'title', 'subjectName', 'classGrade', 'fileSizeLabel', 'createdAt', 'updatedAt']) &&
+          isValidDownloadRecord(incoming());
+        allow update: if isOwner(userId) && isValidId(downloadId) &&
+          isValidDownloadRecord(incoming()) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'subjectName', 'classGrade', 'fileSizeLabel', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(downloadId);
+      }
+    }
+
+    // Shared Curriculum Collections (Published readable by signed-in students; admin full CRUD)
+    match /classes/{classId} {
+      allow get: if isSignedIn() && isValidId(classId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(classId) &&
+        incoming().keys().hasAll(['grade', 'name', 'description', 'studentCount', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['grade', 'name', 'description', 'studentCount', 'published', 'createdAt', 'updatedAt']) &&
+        isValidSchoolClass(incoming());
+      allow update: if isAdmin() && isValidId(classId) &&
+        isValidSchoolClass(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['grade', 'name', 'description', 'studentCount', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(classId);
+    }
+
+    match /subjects/{subjectId} {
+      allow get: if isSignedIn() && isValidId(subjectId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(subjectId) &&
+        incoming().keys().hasAll(['classGrade', 'name', 'subtitle', 'iconKey', 'colorKey', 'chapterCount', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['classGrade', 'name', 'subtitle', 'iconKey', 'colorKey', 'chapterCount', 'published', 'createdAt', 'updatedAt']) &&
+        isValidSubject(incoming());
+      allow update: if isAdmin() && isValidId(subjectId) &&
+        isValidSubject(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['classGrade', 'name', 'subtitle', 'iconKey', 'colorKey', 'chapterCount', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(subjectId);
+    }
+
+    match /chapters/{chapterId} {
+      allow get: if isSignedIn() && isValidId(chapterId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(chapterId) &&
+        incoming().keys().hasAll(['classGrade', 'subjectId', 'subjectName', 'chapterNumber', 'title', 'summary', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterNumber', 'title', 'summary', 'published', 'createdAt', 'updatedAt']) &&
+        isValidChapter(incoming());
+      allow update: if isAdmin() && isValidId(chapterId) &&
+        isValidChapter(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterNumber', 'title', 'summary', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(chapterId);
+    }
+
+    match /study_materials/{materialId} {
+      allow get: if isSignedIn() && isValidId(materialId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(materialId) &&
+        incoming().keys().hasAll(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'materialType', 'contentMarkdown', 'fileSizeLabel', 'tags', 'important', 'premiumOnly', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'materialType', 'contentMarkdown', 'fileSizeLabel', 'tags', 'important', 'premiumOnly', 'published', 'createdAt', 'updatedAt']) &&
+        isValidStudyMaterial(incoming());
+      allow update: if isAdmin() && isValidId(materialId) &&
+        isValidStudyMaterial(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'materialType', 'contentMarkdown', 'fileSizeLabel', 'tags', 'important', 'premiumOnly', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(materialId);
+    }
+
+    match /quizzes/{quizId} {
+      allow get: if isSignedIn() && isValidId(quizId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(quizId) &&
+        incoming().keys().hasAll(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'durationMinutes', 'questionCount', 'premiumOnly', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'durationMinutes', 'questionCount', 'premiumOnly', 'published', 'createdAt', 'updatedAt']) &&
+        isValidQuiz(incoming());
+      allow update: if isAdmin() && isValidId(quizId) &&
+        isValidQuiz(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'chapterId', 'chapterTitle', 'title', 'description', 'durationMinutes', 'questionCount', 'premiumOnly', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(quizId);
+
+      match /questions/{questionId} {
+        allow get: if isSignedIn() && isValidId(questionId) && (existing().published == true || isAdmin());
+        allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+        allow create: if isAdmin() && isValidId(questionId) &&
+          incoming().quizId == quizId &&
+          incoming().keys().hasAll(['quizId', 'questionType', 'prompt', 'options', 'correctIndices', 'correctText', 'explanation', 'points', 'published', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['quizId', 'questionType', 'prompt', 'options', 'correctIndices', 'correctText', 'explanation', 'points', 'published', 'createdAt', 'updatedAt']) &&
+          isValidQuizQuestion(incoming());
+        allow update: if isAdmin() && isValidId(questionId) &&
+          isValidQuizQuestion(incoming()) &&
+          incoming().quizId == existing().quizId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['questionType', 'prompt', 'options', 'correctIndices', 'correctText', 'explanation', 'points', 'published', 'updatedAt']);
+        allow delete: if isAdmin() && isValidId(questionId);
+      }
+    }
+
+    match /exam_papers/{paperId} {
+      allow get: if isSignedIn() && isValidId(paperId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(paperId) &&
+        incoming().keys().hasAll(['classGrade', 'subjectId', 'subjectName', 'title', 'paperCategory', 'year', 'fileSizeLabel', 'contentText', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'title', 'paperCategory', 'year', 'fileSizeLabel', 'contentText', 'published', 'createdAt', 'updatedAt']) &&
+        isValidExamPaper(incoming());
+      allow update: if isAdmin() && isValidId(paperId) &&
+        isValidExamPaper(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['classGrade', 'subjectId', 'subjectName', 'title', 'paperCategory', 'year', 'fileSizeLabel', 'contentText', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(paperId);
+    }
+
+    match /announcements/{announcementId} {
+      allow get: if isSignedIn() && isValidId(announcementId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(announcementId) &&
+        incoming().keys().hasAll(['title', 'message', 'targetClass', 'priority', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['title', 'message', 'targetClass', 'priority', 'published', 'createdAt', 'updatedAt']) &&
+        isValidAnnouncement(incoming());
+      allow update: if isAdmin() && isValidId(announcementId) &&
+        isValidAnnouncement(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'message', 'targetClass', 'priority', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(announcementId);
+    }
+
+    match /app_settings/{settingId} {
+      allow get: if isSignedIn() && isValidId(settingId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(settingId) &&
+        incoming().keys().hasAll(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'createdAt', 'updatedAt']) &&
+        isValidAppSettings(incoming());
+      allow update: if isAdmin() && isValidId(settingId) &&
+        isValidAppSettings(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'maintenanceMode', 'supportEmail', 'published', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+  }
+}

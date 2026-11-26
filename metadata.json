@@ -1,0 +1,6 @@
+{
+  "name": "StudyHub",
+  "description": "Premium educational Android app for Classes 6-12 with study materials, quizzes, offline mode, and admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

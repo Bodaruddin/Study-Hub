@@ -1,0 +1,318 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Student or Admin user profile, class selection, study stats, and preferences.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "email": { "type": "string", "description": "Verified email address" },
+        "selectedClass": { "type": "integer", "description": "Class grade 6 to 12" },
+        "role": { "type": "string", "enum": ["student", "admin"] },
+        "subscriptionTier": { "type": "string", "enum": ["free", "premium"] },
+        "avgScore": { "type": "integer", "description": "Average quiz score percentage" },
+        "dayStreak": { "type": "integer", "description": "Consecutive learning streak in days" },
+        "points": { "type": "integer", "description": "Reward points earned" },
+        "dailyGoalCount": { "type": "integer", "description": "Daily target activities" },
+        "dailyCompletedCount": { "type": "integer", "description": "Completed activities today" },
+        "darkThemeEnabled": { "type": "boolean" },
+        "notificationsEnabled": { "type": "boolean" },
+        "examRemindersEnabled": { "type": "boolean" },
+        "newMaterialsEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update" }
+      },
+      "required": ["userId", "displayName", "selectedClass", "role", "subscriptionTier", "avgScore", "dayStreak", "points", "dailyGoalCount", "dailyCompletedCount", "darkThemeEnabled", "notificationsEnabled", "examRemindersEnabled", "newMaterialsEnabled", "createdAt", "updatedAt"]
+    },
+    "Bookmark": {
+      "title": "Bookmark",
+      "description": "Student saved study material bookmark.",
+      "type": "object",
+      "properties": {
+        "materialId": { "type": "string" },
+        "title": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "classGrade": { "type": "integer" },
+        "materialType": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "accentKey": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["materialId", "title", "subjectName", "classGrade", "materialType", "subtitle", "accentKey", "createdAt", "updatedAt"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Recorded student quiz attempt and score.",
+      "type": "object",
+      "properties": {
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "classGrade": { "type": "integer" },
+        "mode": { "type": "string", "enum": ["practice", "exam"] },
+        "totalQuestions": { "type": "integer" },
+        "correctAnswers": { "type": "integer" },
+        "scorePercent": { "type": "integer" },
+        "durationSeconds": { "type": "integer" },
+        "pointsEarned": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quizId", "quizTitle", "subjectName", "classGrade", "mode", "totalQuestions", "correctAnswers", "scorePercent", "durationSeconds", "pointsEarned", "createdAt", "updatedAt"]
+    },
+    "ReadingProgress": {
+      "title": "ReadingProgress",
+      "description": "Student reading progress for a study material.",
+      "type": "object",
+      "properties": {
+        "materialId": { "type": "string" },
+        "title": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "chapterTitle": { "type": "string" },
+        "classGrade": { "type": "integer" },
+        "progressPercent": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["materialId", "title", "subjectName", "chapterTitle", "classGrade", "progressPercent", "createdAt", "updatedAt"]
+    },
+    "DownloadRecord": {
+      "title": "DownloadRecord",
+      "description": "Metadata for offline downloaded study material.",
+      "type": "object",
+      "properties": {
+        "materialId": { "type": "string" },
+        "title": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "classGrade": { "type": "integer" },
+        "fileSizeLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["materialId", "title", "subjectName", "classGrade", "fileSizeLabel", "createdAt", "updatedAt"]
+    },
+    "SchoolClass": {
+      "title": "SchoolClass",
+      "description": "School class grade (6-12).",
+      "type": "object",
+      "properties": {
+        "grade": { "type": "integer" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "studentCount": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["grade", "name", "description", "studentCount", "published", "createdAt", "updatedAt"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Curriculum subject within a class.",
+      "type": "object",
+      "properties": {
+        "classGrade": { "type": "integer" },
+        "name": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "iconKey": { "type": "string" },
+        "colorKey": { "type": "string" },
+        "chapterCount": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classGrade", "name", "subtitle", "iconKey", "colorKey", "chapterCount", "published", "createdAt", "updatedAt"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "Chapter belonging to a subject.",
+      "type": "object",
+      "properties": {
+        "classGrade": { "type": "integer" },
+        "subjectId": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "chapterNumber": { "type": "integer" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classGrade", "subjectId", "subjectName", "chapterNumber", "title", "summary", "published", "createdAt", "updatedAt"]
+    },
+    "StudyMaterial": {
+      "title": "StudyMaterial",
+      "description": "Educational note, summary, guide, Q&A set, or PDF lesson.",
+      "type": "object",
+      "properties": {
+        "classGrade": { "type": "integer" },
+        "subjectId": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "chapterTitle": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "materialType": { "type": "string" },
+        "contentMarkdown": { "type": "string" },
+        "fileSizeLabel": { "type": "string" },
+        "tags": { "type": "array" },
+        "important": { "type": "boolean" },
+        "premiumOnly": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classGrade", "subjectId", "subjectName", "chapterId", "chapterTitle", "title", "description", "materialType", "contentMarkdown", "fileSizeLabel", "tags", "important", "premiumOnly", "published", "createdAt", "updatedAt"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "Quiz metadata for practice and exam modes.",
+      "type": "object",
+      "properties": {
+        "classGrade": { "type": "integer" },
+        "subjectId": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "chapterTitle": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "durationMinutes": { "type": "integer" },
+        "questionCount": { "type": "integer" },
+        "premiumOnly": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classGrade", "subjectId", "subjectName", "chapterId", "chapterTitle", "title", "description", "durationMinutes", "questionCount", "premiumOnly", "published", "createdAt", "updatedAt"]
+    },
+    "QuizQuestion": {
+      "title": "QuizQuestion",
+      "description": "Question inside a quiz subcollection.",
+      "type": "object",
+      "properties": {
+        "quizId": { "type": "string" },
+        "questionType": { "type": "string", "enum": ["mcq", "multi_select", "true_false", "fill_blank"] },
+        "prompt": { "type": "string" },
+        "options": { "type": "array" },
+        "correctIndices": { "type": "array" },
+        "correctText": { "type": "string" },
+        "explanation": { "type": "string" },
+        "points": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quizId", "questionType", "prompt", "options", "correctIndices", "correctText", "explanation", "points", "published", "createdAt", "updatedAt"]
+    },
+    "ExamPaper": {
+      "title": "ExamPaper",
+      "description": "Previous year, model, or sample exam paper.",
+      "type": "object",
+      "properties": {
+        "classGrade": { "type": "integer" },
+        "subjectId": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "title": { "type": "string" },
+        "paperCategory": { "type": "string", "enum": ["previous_year", "model_paper", "sample_paper", "important_questions"] },
+        "year": { "type": "integer" },
+        "fileSizeLabel": { "type": "string" },
+        "contentText": { "type": "string" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classGrade", "subjectId", "subjectName", "title", "paperCategory", "year", "fileSizeLabel", "contentText", "published", "createdAt", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Platform announcement or exam alert.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "targetClass": { "type": "integer" },
+        "priority": { "type": "string", "enum": ["normal", "high"] },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "message", "targetClass", "priority", "published", "createdAt", "updatedAt"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global platform configuration and monetization settings.",
+      "type": "object",
+      "properties": {
+        "premiumMonthlyPrice": { "type": "string" },
+        "premiumYearlyPrice": { "type": "string" },
+        "adsEnabled": { "type": "boolean" },
+        "maintenanceMode": { "type": "boolean" },
+        "supportEmail": { "type": "string" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["premiumMonthlyPrice", "premiumYearlyPrice", "adsEnabled", "maintenanceMode", "supportEmail", "published", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user profile and settings."
+    },
+    "/users/{userId}/bookmarks/{bookmarkId}": {
+      "schema": { "$ref": "#/entities/Bookmark" },
+      "description": "User saved bookmarks."
+    },
+    "/users/{userId}/quiz_attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/QuizAttempt" },
+      "description": "User quiz attempts and scores."
+    },
+    "/users/{userId}/reading_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/ReadingProgress" },
+      "description": "User reading progress records."
+    },
+    "/users/{userId}/downloads/{downloadId}": {
+      "schema": { "$ref": "#/entities/DownloadRecord" },
+      "description": "User downloaded materials metadata."
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/SchoolClass" },
+      "description": "Available school classes (6-12)."
+    },
+    "/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/Subject" },
+      "description": "Subjects per class."
+    },
+    "/chapters/{chapterId}": {
+      "schema": { "$ref": "#/entities/Chapter" },
+      "description": "Chapters per subject."
+    },
+    "/study_materials/{materialId}": {
+      "schema": { "$ref": "#/entities/StudyMaterial" },
+      "description": "Study materials and notes."
+    },
+    "/quizzes/{quizId}": {
+      "schema": { "$ref": "#/entities/Quiz" },
+      "description": "Quizzes catalog."
+    },
+    "/quizzes/{quizId}/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/QuizQuestion" },
+      "description": "Quiz questions subcollection."
+    },
+    "/exam_papers/{paperId}": {
+      "schema": { "$ref": "#/entities/ExamPaper" },
+      "description": "Previous year, model, and sample exam papers."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Educational announcements and reminders."
+    },
+    "/app_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AppSettings" },
+      "description": "Global StudyHub settings and pricing."
+    }
+  }
+}
