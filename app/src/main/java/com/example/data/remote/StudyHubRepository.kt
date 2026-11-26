@@ -105,7 +105,7 @@ class StudyHubRepository(
                 val initial = UserProfile(
                     id = uid,
                     userId = uid,
-                    displayName = displayName.ifBlank { "Momrooj Ali" },
+                    displayName = displayName.ifBlank { "StudyHub Student" },
                     email = email,
                     selectedClass = 7L,
                     role = role,

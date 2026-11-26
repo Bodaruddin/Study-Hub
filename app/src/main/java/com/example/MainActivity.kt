@@ -167,11 +167,15 @@ private fun StudyHubApp() {
             factory = object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    val resolvedName = currentUser.displayName?.takeIf { it.isNotBlank() }
+                        ?: currentUser.phoneNumber?.takeIf { it.isNotBlank() }?.let { "Student (${it.takeLast(4)})" }
+                        ?: currentUser.email?.substringBefore('@')?.takeIf { it.isNotBlank() }
+                        ?: "StudyHub Student"
                     return StudyHubViewModel(
                         repository = repository,
                         syncManager = syncManager,
                         currentUserId = currentUser.uid,
-                        currentUserName = currentUser.displayName ?: "Momrooj Ali",
+                        currentUserName = resolvedName,
                         currentUserEmail = currentUser.email ?: ""
                     ) as T
                 }

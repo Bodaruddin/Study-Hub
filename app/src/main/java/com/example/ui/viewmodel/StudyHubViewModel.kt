@@ -67,7 +67,7 @@ class StudyHubViewModel(
         UserProfile(
             id = currentUserId,
             userId = currentUserId,
-            displayName = currentUserName.ifBlank { "Momrooj Ali" },
+            displayName = currentUserName.ifBlank { "StudyHub Student" },
             email = currentUserEmail,
             selectedClass = 7L,
             role = if (repository.isVerifiedAdminEmail(currentUserEmail)) "admin" else "student"
