@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Add
@@ -244,47 +246,54 @@ fun AdminShellScreen(
                 drawerContainerColor = NavySurface,
                 drawerContentColor = Color.White
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    StudyHubBrandLogo(subtitle = "Admin Management", isDarkSurface = true)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    HorizontalDivider(color = NavyCardBorder)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                AdminModule.entries.forEach { mod ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .navigationBarsPadding()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        StudyHubBrandLogo(subtitle = "Admin Management", isDarkSurface = true)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(color = NavyCardBorder)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    AdminModule.entries.forEach { mod ->
+                        NavigationDrawerItem(
+                            label = { Text(mod.label) },
+                            selected = activeModule == mod,
+                            onClick = {
+                                activeModule = mod
+                                activeBottomTab = when (mod) {
+                                    AdminModule.DASHBOARD -> 0
+                                    AdminModule.CLASSES -> 1
+                                    AdminModule.ANALYTICS -> 2
+                                    AdminModule.SETTINGS -> 3
+                                    AdminModule.SUPPORT -> 4
+                                    else -> activeBottomTab
+                                }
+                                scope.launch { drawerState.close() }
+                            },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = ElectricPurple.copy(alpha = 0.28f),
+                                selectedTextColor = Color.White,
+                                unselectedTextColor = Color(0xFFC5CEF0)
+                            ),
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = NavyCardBorder, modifier = Modifier.padding(horizontal = 16.dp))
                     NavigationDrawerItem(
-                        label = { Text(mod.label) },
-                        selected = activeModule == mod,
+                        label = { Text("Switch to Student App", color = Color(0xFF5CE1A8), fontWeight = FontWeight.Bold) },
+                        selected = false,
                         onClick = {
-                            activeModule = mod
-                            activeBottomTab = when (mod) {
-                                AdminModule.DASHBOARD -> 0
-                                AdminModule.CLASSES -> 1
-                                AdminModule.ANALYTICS -> 2
-                                AdminModule.SETTINGS -> 3
-                                AdminModule.SUPPORT -> 4
-                                else -> activeBottomTab
-                            }
                             scope.launch { drawerState.close() }
+                            onSwitchToStudentView()
                         },
-                        colors = NavigationDrawerItemDefaults.colors(
-                            selectedContainerColor = ElectricPurple.copy(alpha = 0.28f),
-                            selectedTextColor = Color.White,
-                            unselectedTextColor = Color(0xFFC5CEF0)
-                        ),
-                        modifier = Modifier.padding(horizontal = 10.dp)
+                        modifier = Modifier.padding(10.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(color = NavyCardBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                NavigationDrawerItem(
-                    label = { Text("Switch to Student App", color = Color(0xFF5CE1A8), fontWeight = FontWeight.Bold) },
-                    selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        onSwitchToStudentView()
-                    },
-                    modifier = Modifier.padding(10.dp)
-                )
             }
         }
     ) {
@@ -394,9 +403,7 @@ private fun AdminDashboardContent(
     var rangeMenuOpen by remember { mutableStateOf(false) }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -725,6 +732,7 @@ private fun AdminDashboardContent(
                                 depthHeight = 2.5.dp,
                                 floatingLift = 2.dp,
                                 glassGlossAlpha = 0.55f,
+                                fillMaxWidth = false,
                                 onClick = { rangeMenuOpen = true }
                             ) {
                                 Row(

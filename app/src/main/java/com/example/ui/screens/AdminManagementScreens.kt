@@ -52,9 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AnnouncementItem
@@ -119,33 +122,109 @@ fun AdminSubmoduleScaffold(
         modifier = Modifier
             .fillMaxSize()
             .background(NavyDeep)
-            .statusBarsPadding()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBackToDashboard) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Color.White)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                IconButton(
+                    onClick = onBackToDashboard,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("admin_submodule_back")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .shadow(
+                                elevation = 4.dp,
+                                shape = RoundedCornerShape(12.dp),
+                                ambientColor = Color(0xFF06091F),
+                                spotColor = Color(0xFF06091F)
+                            )
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF212B66), Color(0xFF141B44))
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.verticalGradient(
+                                    listOf(Color.White.copy(alpha = 0.34f), NavyCardBorder)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = module.label,
                     fontFamily = OutfitFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp,
-                    color = Color.White
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Rounded.Menu, contentDescription = "Menu", tint = Color.White)
+            IconButton(
+                onClick = onOpenDrawer,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("admin_submodule_menu")
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .shadow(
+                            elevation = 4.dp,
+                            shape = RoundedCornerShape(12.dp),
+                            ambientColor = Color(0xFF06091F),
+                            spotColor = Color(0xFF06091F)
+                        )
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF212B66), Color(0xFF141B44))
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.34f), NavyCardBorder)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.Menu,
+                        contentDescription = "Menu",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
         LazyColumn(
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -556,7 +635,8 @@ private fun AdminActionHeader(title: String, buttonText: String, onClick: () -> 
             style = MaterialTheme.typography.titleMedium,
             color = Color.White,
             fontWeight = FontWeight.Bold,
-            maxLines = 2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -568,15 +648,23 @@ private fun AdminActionHeader(title: String, buttonText: String, onClick: () -> 
             depthHeight = 3.5.dp,
             floatingLift = 3.dp,
             glassGlossAlpha = 1.0f,
+            fillMaxWidth = false,
             onClick = onClick
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(buttonText, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = buttonText,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }

@@ -245,6 +245,7 @@ fun Tactile3DCard(
     borderEndColor: Color = Color.White.copy(alpha = 0.26f),
     glassGlossAlpha: Float = 1f,
     floatingLift: Dp = 5.dp,
+    fillMaxWidth: Boolean = true,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -325,11 +326,11 @@ fun Tactile3DCard(
                     )
                 }
             }
-            .padding(end = rightLift, bottom = floatingLift),
-        propagateMinConstraints = true
+            .padding(end = rightLift, bottom = floatingLift)
     ) {
         Box(
             modifier = Modifier
+                .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
@@ -359,19 +360,18 @@ fun Tactile3DCard(
                         Modifier
                     }
                 )
-                .padding(end = activeRightDepth, bottom = activeDepth),
-            propagateMinConstraints = true
+                .padding(end = activeRightDepth, bottom = activeDepth)
         ) {
             Box(
                 modifier = Modifier
+                    .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
                     .clip(shape)
                     .background(faceBrush)
                     .border(
                         width = 1.25.dp,
                         brush = Brush.linearGradient(listOf(highlightBorderColor, borderEndColor)),
                         shape = shape
-                    ),
-                propagateMinConstraints = true
+                    )
             ) {
                 if (glassGlossAlpha > 0f) {
                     Canvas(modifier = Modifier.matchParentSize()) {
