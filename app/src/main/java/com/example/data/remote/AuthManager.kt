@@ -23,12 +23,8 @@ import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.OAuthProvider
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.auth.auth
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -43,11 +39,6 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
-}
-
-enum class OAuthLoginProvider(val providerId: String, val displayName: String) {
-    GITHUB("github.com", "GitHub"),
-    MICROSOFT("microsoft.com", "Microsoft")
 }
 
 object AuthManager {
@@ -159,132 +150,6 @@ object AuthManager {
                 val projectTag = activeProjectId()?.let { " (Project: $it)" } ?: ""
                 val detail = e.localizedMessage?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
                 onAuthError("Google Sign-In failed$projectTag: $detail")
-            }
-        }
-    }
-
-    fun sendPhoneVerificationCode(
-        context: Context,
-        phoneNumberRaw: String,
-        scope: CoroutineScope,
-        resendToken: PhoneAuthProvider.ForceResendingToken? = null,
-        onCodeSent: (verificationId: String, token: PhoneAuthProvider.ForceResendingToken) -> Unit,
-        onAuthSuccess: () -> Unit,
-        onAuthError: (String) -> Unit
-    ) {
-        val normalized = phoneNumberRaw.trim().replace(Regex("[\\s\\-()]"), "")
-        if (!normalized.matches(Regex("^\\+[1-9]\\d{6,14}$"))) {
-            onAuthError("Enter a valid phone number with country code (for example +919876543210).")
-            return
-        }
-
-        val activity = context.findActivity()
-        if (activity == null) {
-            onAuthError("Phone verification requires an active screen context.")
-            return
-        }
-
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                scope.launch {
-                    try {
-                        Firebase.auth.signInWithCredential(credential).await()
-                        onAuthSuccess()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Instant phone verification sign-in failed", e)
-                        onAuthError(mapAuthException(e, "Phone"))
-                    }
-                }
-            }
-
-            override fun onVerificationFailed(e: FirebaseException) {
-                Log.w(TAG, "Phone verification failed: ${e.message}", e)
-                onAuthError(mapAuthException(e, "Phone"))
-            }
-
-            override fun onCodeSent(
-                verificationId: String,
-                token: PhoneAuthProvider.ForceResendingToken
-            ) {
-                onCodeSent(verificationId, token)
-            }
-        }
-
-        val builder = PhoneAuthOptions.newBuilder(Firebase.auth)
-            .setPhoneNumber(normalized)
-            .setTimeout(60L, TimeUnit.SECONDS)
-            .setActivity(activity)
-            .setCallbacks(callbacks)
-
-        if (resendToken != null) {
-            builder.setForceResendingToken(resendToken)
-        }
-
-        PhoneAuthProvider.verifyPhoneNumber(builder.build())
-    }
-
-    fun verifyPhoneOtpCode(
-        verificationId: String,
-        otpCode: String,
-        scope: CoroutineScope,
-        onAuthSuccess: () -> Unit,
-        onAuthError: (String) -> Unit
-    ) {
-        val cleanCode = otpCode.trim()
-        if (cleanCode.length != 6 || !cleanCode.all { it.isDigit() }) {
-            onAuthError("Enter the 6-digit OTP sent to your phone.")
-            return
-        }
-
-        val credential = PhoneAuthProvider.getCredential(verificationId, cleanCode)
-        scope.launch {
-            try {
-                Firebase.auth.signInWithCredential(credential).await()
-                onAuthSuccess()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "OTP verification failed", e)
-                onAuthError(mapAuthException(e, "Phone"))
-            }
-        }
-    }
-
-    fun onOAuthProviderClicked(
-        context: Context,
-        provider: OAuthLoginProvider,
-        scope: CoroutineScope,
-        onAuthSuccess: () -> Unit,
-        onAuthError: (String) -> Unit
-    ) {
-        val activity = context.findActivity()
-        if (activity == null) {
-            onAuthError("${provider.displayName} sign-in requires an active screen context.")
-            return
-        }
-
-        scope.launch {
-            try {
-                val pending = Firebase.auth.pendingAuthResult
-                if (pending != null) {
-                    pending.await()
-                    onAuthSuccess()
-                    return@launch
-                }
-
-                val builder = OAuthProvider.newBuilder(provider.providerId)
-                if (provider == OAuthLoginProvider.MICROSOFT) {
-                    builder.addCustomParameter("prompt", "select_account")
-                }
-                Firebase.auth.startActivityForSignInWithProvider(activity, builder.build()).await()
-                onAuthSuccess()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "${provider.displayName} sign-in failed", e)
-                onAuthError(mapAuthException(e, provider.displayName))
             }
         }
     }
@@ -420,12 +285,6 @@ object AuthManager {
                     "Password is too weak. Use at least 6 characters."
                 "ERROR_USER_DISABLED" ->
                     "This account has been disabled. Contact support for assistance."
-                "ERROR_INVALID_PHONE_NUMBER" ->
-                    "Invalid phone number. Include the country code (e.g. +919876543210)."
-                "ERROR_INVALID_VERIFICATION_CODE" ->
-                    "Incorrect OTP code. Please check the SMS and try again."
-                "ERROR_SESSION_EXPIRED" ->
-                    "OTP expired. Please request a new verification code."
                 "ERROR_TOO_MANY_REQUESTS", "ERROR_QUOTA_EXCEEDED" ->
                     "Too many sign-in attempts right now. Please wait and try again."
                 "ERROR_WEB_CONTEXT_CANCELED", "ERROR_USER_CANCELLED" ->
