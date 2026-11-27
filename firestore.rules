@@ -239,6 +239,23 @@ service cloud.firestore {
         isValidTimestamp(data.updatedAt);
     }
 
+    function isValidPaperAttachment(data) {
+      return data.parentId is string && data.parentId.size() >= 1 && data.parentId.size() <= 128 &&
+        data.groupId is string && data.groupId.size() >= 1 && data.groupId.size() <= 128 &&
+        data.kind in ['pdf', 'image'] &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 180 &&
+        data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 80 &&
+        data.sizeBytes is int && data.sizeBytes >= 1 && data.sizeBytes <= 6000000 &&
+        data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex <= 20 &&
+        data.totalChunks is int && data.totalChunks >= 1 && data.totalChunks <= 20 &&
+        data.chunkIndex < data.totalChunks &&
+        data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 100 &&
+        data.published is bool &&
+        data.dataBase64 is string && data.dataBase64.size() >= 1 && data.dataBase64.size() <= 750000 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
     // Trusted Admin Registry
     match /admins/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
@@ -460,6 +477,23 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly(['premiumMonthlyPrice', 'premiumYearlyPrice', 'adsEnabled', 'adFamilySafeMode', 'adPlacementHome', 'adPlacementMaterials', 'adPlacementQuizzes', 'adPlacementPapers', 'adBannerTitle', 'adBannerSubtitle', 'adCtaLabel', 'adNetworkProvider', 'maintenanceMode', 'supportEmail', 'published', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /paper_attachments/{attachmentId} {
+      allow get: if isSignedIn() && isValidId(attachmentId) && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.published == true || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin() && isValidId(attachmentId) &&
+        incoming().keys().hasAll(['parentId', 'groupId', 'kind', 'fileName', 'mimeType', 'sizeBytes', 'chunkIndex', 'totalChunks', 'sortOrder', 'published', 'dataBase64', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['parentId', 'groupId', 'kind', 'fileName', 'mimeType', 'sizeBytes', 'chunkIndex', 'totalChunks', 'sortOrder', 'published', 'dataBase64', 'createdAt', 'updatedAt']) &&
+        isValidPaperAttachment(incoming());
+      allow update: if isAdmin() && isValidId(attachmentId) &&
+        isValidPaperAttachment(incoming()) &&
+        incoming().parentId == existing().parentId &&
+        incoming().groupId == existing().groupId &&
+        incoming().chunkIndex == existing().chunkIndex &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['published', 'sortOrder', 'fileName', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(attachmentId);
     }
   }
 }

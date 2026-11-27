@@ -264,6 +264,27 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["premiumMonthlyPrice", "premiumYearlyPrice", "adsEnabled", "maintenanceMode", "supportEmail", "published", "createdAt", "updatedAt"]
+    },
+    "PaperAttachmentChunk": {
+      "title": "PaperAttachmentChunk",
+      "description": "Chunked PDF or compressed image attachment belonging to an exam paper or study material.",
+      "type": "object",
+      "properties": {
+        "parentId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "kind": { "type": "string", "enum": ["pdf", "image"] },
+        "fileName": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "sizeBytes": { "type": "integer" },
+        "chunkIndex": { "type": "integer" },
+        "totalChunks": { "type": "integer" },
+        "sortOrder": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "dataBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentId", "groupId", "kind", "fileName", "mimeType", "sizeBytes", "chunkIndex", "totalChunks", "sortOrder", "published", "dataBase64", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -322,6 +343,10 @@
     "/app_settings/{settingId}": {
       "schema": { "$ref": "#/entities/AppSettings" },
       "description": "Global StudyHub settings and pricing."
+    },
+    "/paper_attachments/{attachmentId}": {
+      "schema": { "$ref": "#/entities/PaperAttachmentChunk" },
+      "description": "PDF and image attachment chunks for exam papers and study materials."
     }
   }
 }

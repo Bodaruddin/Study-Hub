@@ -116,7 +116,7 @@ private fun StudyHubApp() {
     val roomDb = remember { StudyHubDatabase.getInstance(appContext) }
     val dao = remember { roomDb.studyHubDao() }
     val syncManager = remember { OfflineSyncManager(appContext, dao, firestoreDb) }
-    val repository = remember { StudyHubRepository(firestoreDb, dao, syncManager) }
+    val repository = remember { StudyHubRepository(firestoreDb, dao, syncManager, appContext) }
 
     val authUser by AuthManager.authStateFlow().collectAsStateWithLifecycle(
         initialValue = Firebase.auth.currentUser
@@ -239,12 +239,15 @@ private fun StudyHubApp() {
                         onDeleteClass = viewModel::deleteSchoolClass,
                         onSaveSubject = viewModel::saveSubject,
                         onSaveChapter = viewModel::saveChapter,
-                        onSaveMaterial = viewModel::saveStudyMaterial,
+                        onSaveMaterial = viewModel::saveStudyMaterialWithAttachments,
                         onTogglePublishMaterial = viewModel::toggleMaterialPublish,
                         onDeleteMaterial = viewModel::deleteStudyMaterial,
                         onSaveQuizWithQuestion = viewModel::saveQuizWithQuestion,
                         onAddQuestionToQuiz = viewModel::addQuestionToQuiz,
-                        onSaveExamPaper = viewModel::saveExamPaper,
+                        onSaveExamPaper = viewModel::saveExamPaperWithAttachments,
+                        onTogglePublishExamPaper = viewModel::toggleExamPaperPublish,
+                        onDeleteExamPaper = viewModel::deleteExamPaper,
+                        onLoadAttachments = viewModel::loadAttachmentsForParent,
                         onSendAnnouncement = viewModel::sendAnnouncement,
                         onSaveAppSettings = viewModel::saveAppSettings,
                         onSyncCloudNow = viewModel::syncCloudDatabaseNow,
@@ -370,6 +373,7 @@ private fun StudentShellScreen(
                     onToggleDownloadPaper = viewModel::toggleExamPaperDownload,
                     onSelectClass = viewModel::updateSelectedClass,
                     onBack = { subRoute = null },
+                    onLoadAttachments = viewModel::loadAttachmentsForParent,
                     appSettings = appSettings,
                     isPremiumUser = isPremiumUser,
                     onOpenPremium = { subRoute = StudentSubRoute.PREMIUM }
@@ -474,6 +478,7 @@ private fun StudentShellScreen(
                             studyInitialMaterial = null
                             selectedTab = 0
                         },
+                        onLoadAttachments = viewModel::loadAttachmentsForParent,
                         appSettings = appSettings
                     )
 

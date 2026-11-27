@@ -70,9 +70,11 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.AppSettings
 import com.example.data.model.ChapterItem
 import com.example.data.model.MaterialType
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.ui.components.EthicalAdFreeUpgradeBanner
+import com.example.ui.components.PaperAttachmentGallery
 import com.example.ui.components.SubjectIconBadge
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.BlueStart
@@ -100,6 +102,7 @@ fun StudyMaterialsScreen(
     onOpenGlobalSearch: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>> = { Result.success(emptyList()) },
     appSettings: AppSettings = AppSettings()
 ) {
     var activeSubject by remember(initialSubject) { mutableStateOf(initialSubject) }
@@ -117,6 +120,7 @@ fun StudyMaterialsScreen(
             isBookmarked = readingMaterial!!.id in bookmarkedMaterialIds,
             isDownloaded = readingMaterial!!.id in downloadedMaterialIds,
             isPremiumUser = isPremiumUser,
+            onLoadAttachments = onLoadAttachments,
             onToggleBookmark = { onToggleBookmark(readingMaterial!!) },
             onToggleDownload = { onToggleDownload(readingMaterial!!) },
             onMarkComplete = {
@@ -792,6 +796,7 @@ private fun MaterialReaderView(
     isBookmarked: Boolean,
     isDownloaded: Boolean,
     isPremiumUser: Boolean,
+    onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
     onToggleBookmark: () -> Unit,
     onToggleDownload: () -> Unit,
     onMarkComplete: () -> Unit,
@@ -918,6 +923,11 @@ private fun MaterialReaderView(
                                 )
                             }
                         }
+                        PaperAttachmentGallery(
+                            parentId = material.id,
+                            onLoadAttachments = onLoadAttachments,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
                         material.contentMarkdown.lines().forEach { line ->
                             when {
                                 line.startsWith("# ") -> Text(

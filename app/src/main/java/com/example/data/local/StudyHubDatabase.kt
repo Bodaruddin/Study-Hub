@@ -18,9 +18,10 @@ import androidx.room.RoomDatabase
         CachedQuizAttemptEntity::class,
         CachedReadingProgressEntity::class,
         CachedDownloadEntity::class,
-        PendingSyncEntity::class
+        PendingSyncEntity::class,
+        CachedPaperAttachmentEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class StudyHubDatabase : RoomDatabase() {

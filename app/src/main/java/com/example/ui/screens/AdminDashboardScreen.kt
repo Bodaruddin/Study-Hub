@@ -93,8 +93,10 @@ import com.example.data.model.AnnouncementItem
 import com.example.data.model.AppSettings
 import com.example.data.model.ChapterItem
 import com.example.data.model.ExamPaper
+import com.example.data.model.PaperAttachmentDraft
 import com.example.data.model.QuizItem
 import com.example.data.model.QuizQuestion
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
@@ -182,12 +184,15 @@ fun AdminShellScreen(
     onDeleteClass: (String) -> Unit,
     onSaveSubject: (SubjectItem, Boolean) -> Unit,
     onSaveChapter: (ChapterItem, Boolean) -> Unit,
-    onSaveMaterial: (StudyMaterial, Boolean) -> Unit,
+    onSaveMaterial: (StudyMaterial, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishMaterial: (StudyMaterial) -> Unit,
     onDeleteMaterial: (String) -> Unit,
     onSaveQuizWithQuestion: (QuizItem, QuizQuestion?) -> Unit,
     onAddQuestionToQuiz: (QuizQuestion) -> Unit,
-    onSaveExamPaper: (ExamPaper, Boolean) -> Unit,
+    onSaveExamPaper: (ExamPaper, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
+    onTogglePublishExamPaper: (ExamPaper) -> Unit,
+    onDeleteExamPaper: (String) -> Unit,
+    onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
     onSendAnnouncement: (String, String, Long, String) -> Unit,
     onSaveAppSettings: (AppSettings) -> Unit,
     onSyncCloudNow: () -> Unit,
@@ -202,6 +207,7 @@ fun AdminShellScreen(
     var showAddClassDialog by remember { mutableStateOf(false) }
     var showAddSubjectDialog by remember { mutableStateOf(false) }
     var showUploadMaterialDialog by remember { mutableStateOf(false) }
+    var editingMaterial by remember { mutableStateOf<StudyMaterial?>(null) }
     var showAddMcqDialog by remember { mutableStateOf(false) }
     var showCreateQuizDialog by remember { mutableStateOf(false) }
     var showAnnouncementDialog by remember { mutableStateOf(false) }
@@ -227,14 +233,25 @@ fun AdminShellScreen(
             }
         )
     }
-    if (showUploadMaterialDialog) {
+    if (showUploadMaterialDialog || editingMaterial != null) {
+        val targetMaterial = editingMaterial
         AdminUploadMaterialDialog(
             subjects = subjects,
             chapters = chapters,
-            onDismiss = { showUploadMaterialDialog = false },
-            onSave = { mat ->
-                onSaveMaterial(mat, true)
+            initialMaterial = targetMaterial,
+            onLoadAttachments = onLoadAttachments,
+            onDismiss = {
                 showUploadMaterialDialog = false
+                editingMaterial = null
+            },
+            onSave = { mat, drafts, onDone ->
+                onSaveMaterial(mat, targetMaterial == null, drafts) { ok ->
+                    onDone(ok)
+                    if (ok) {
+                        showUploadMaterialDialog = false
+                        editingMaterial = null
+                    }
+                }
             }
         )
     }
@@ -408,12 +425,19 @@ fun AdminShellScreen(
                         onDeleteClass = onDeleteClass,
                         onOpenAddSubject = { showAddSubjectDialog = true },
                         onSaveChapter = onSaveChapter,
-                        onOpenUploadMaterial = { showUploadMaterialDialog = true },
+                        onOpenUploadMaterial = {
+                            editingMaterial = null
+                            showUploadMaterialDialog = true
+                        },
+                        onEditMaterial = { mat -> editingMaterial = mat },
                         onTogglePublishMaterial = onTogglePublishMaterial,
                         onDeleteMaterial = onDeleteMaterial,
                         onOpenAddMcq = { showAddMcqDialog = true },
                         onOpenCreateQuiz = { showCreateQuizDialog = true },
                         onSaveExamPaper = onSaveExamPaper,
+                        onTogglePublishExamPaper = onTogglePublishExamPaper,
+                        onDeleteExamPaper = onDeleteExamPaper,
+                        onLoadAttachments = onLoadAttachments,
                         onOpenAnnouncementDialog = { showAnnouncementDialog = true },
                         onSaveAppSettings = onSaveAppSettings,
                         onSyncCloudNow = onSyncCloudNow,

@@ -24,6 +24,12 @@ interface StudyHubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSubjects(items: List<CachedSubjectEntity>)
 
+    @Query("DELETE FROM cached_classes WHERE id = :id")
+    suspend fun deleteClassById(id: String)
+
+    @Query("DELETE FROM cached_subjects WHERE id = :id")
+    suspend fun deleteSubjectById(id: String)
+
     // Chapters
     @Query("SELECT * FROM cached_chapters ORDER BY classGrade ASC, chapterNumber ASC")
     fun observeAllChapters(): Flow<List<CachedChapterEntity>>
@@ -43,6 +49,9 @@ interface StudyHubDao {
 
     @Query("UPDATE cached_materials SET downloadedOffline = :downloaded, downloadedAtMillis = :timestamp WHERE id = :materialId")
     suspend fun setMaterialDownloaded(materialId: String, downloaded: Boolean, timestamp: Long)
+
+    @Query("DELETE FROM cached_materials WHERE id = :id")
+    suspend fun deleteMaterialById(id: String)
 
     // Quizzes & Questions
     @Query("SELECT * FROM cached_quizzes ORDER BY classGrade ASC, title ASC")
@@ -72,6 +81,25 @@ interface StudyHubDao {
 
     @Query("UPDATE cached_exam_papers SET downloadedOffline = :downloaded WHERE id = :paperId")
     suspend fun setExamPaperDownloaded(paperId: String, downloaded: Boolean)
+
+    @Query("DELETE FROM cached_exam_papers WHERE id = :id")
+    suspend fun deleteExamPaperById(id: String)
+
+    // Paper Attachments
+    @Query("SELECT * FROM cached_paper_attachments WHERE parentId = :parentId ORDER BY sortOrder ASC")
+    fun observeAttachmentsForParent(parentId: String): Flow<List<CachedPaperAttachmentEntity>>
+
+    @Query("SELECT * FROM cached_paper_attachments WHERE parentId = :parentId ORDER BY sortOrder ASC")
+    suspend fun getAttachmentsForParentOnce(parentId: String): List<CachedPaperAttachmentEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPaperAttachments(items: List<CachedPaperAttachmentEntity>)
+
+    @Query("DELETE FROM cached_paper_attachments WHERE parentId = :parentId")
+    suspend fun deleteAttachmentsForParent(parentId: String)
+
+    @Query("DELETE FROM cached_paper_attachments WHERE groupId = :groupId")
+    suspend fun deleteAttachmentGroup(groupId: String)
 
     // User Bookmarks
     @Query("SELECT * FROM cached_bookmarks WHERE userId = :userId ORDER BY savedAtMillis DESC")
@@ -171,6 +199,9 @@ interface StudyHubDao {
     @Query("DELETE FROM cached_exam_papers")
     suspend fun clearCachedExamPapers()
 
+    @Query("DELETE FROM cached_paper_attachments")
+    suspend fun clearCachedPaperAttachments()
+
     @Transaction
     suspend fun clearCurriculumCache() {
         clearCachedClasses()
@@ -180,5 +211,6 @@ interface StudyHubDao {
         clearCachedQuizzes()
         clearCachedQuestions()
         clearCachedExamPapers()
+        clearCachedPaperAttachments()
     }
 }

@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import android.content.Context
 import android.util.Log
 import com.example.data.local.CachedBookmarkEntity
 import com.example.data.local.CachedChapterEntity
@@ -7,6 +8,7 @@ import com.example.data.local.CachedClassEntity
 import com.example.data.local.CachedDownloadEntity
 import com.example.data.local.CachedExamPaperEntity
 import com.example.data.local.CachedMaterialEntity
+import com.example.data.local.CachedPaperAttachmentEntity
 import com.example.data.local.CachedQuestionEntity
 import com.example.data.local.CachedQuizAttemptEntity
 import com.example.data.local.CachedQuizEntity
@@ -20,10 +22,13 @@ import com.example.data.model.BookmarkRecord
 import com.example.data.model.ChapterItem
 import com.example.data.model.DownloadRecord
 import com.example.data.model.ExamPaper
+import com.example.data.model.PaperAttachmentChunk
+import com.example.data.model.PaperAttachmentDraft
 import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizItem
 import com.example.data.model.QuizQuestion
 import com.example.data.model.ReadingProgressRecord
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
@@ -35,6 +40,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -48,7 +54,8 @@ import org.json.JSONObject
 class StudyHubRepository(
     private val db: FirebaseFirestore,
     private val dao: StudyHubDao,
-    private val syncManager: OfflineSyncManager
+    private val syncManager: OfflineSyncManager,
+    private val appContext: Context
 ) {
     private val auth = Firebase.auth
 
@@ -863,14 +870,19 @@ class StudyHubRepository(
         }
     }
 
-    suspend fun deleteSchoolClass(classId: String): Result<Unit> = deleteAdminDoc("classes", classId)
+    suspend fun deleteSchoolClass(classId: String): Result<Unit> {
+        val res = deleteAdminDoc("classes", classId)
+        if (res.isSuccess) dao.deleteClassById(classId)
+        return res
+    }
 
     suspend fun saveSubject(item: SubjectItem, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "sub_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
             val ref = db.collection("subjects").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            val writeAsCreate = isCreate || !ref.get().await().exists()
+            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
             dao.upsertSubjects(listOf(CachedSubjectEntity(docId, item.classGrade, item.name, item.subtitle, item.iconKey, item.colorKey, item.chapterCount, item.published)))
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -881,7 +893,11 @@ class StudyHubRepository(
         }
     }
 
-    suspend fun deleteSubject(subjectId: String): Result<Unit> = deleteAdminDoc("subjects", subjectId)
+    suspend fun deleteSubject(subjectId: String): Result<Unit> {
+        val res = deleteAdminDoc("subjects", subjectId)
+        if (res.isSuccess) dao.deleteSubjectById(subjectId)
+        return res
+    }
 
     suspend fun saveChapter(item: ChapterItem, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "chap_${System.currentTimeMillis()}" }
@@ -904,7 +920,9 @@ class StudyHubRepository(
         return try {
             requireUserId()
             val ref = db.collection("study_materials").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            val writeAsCreate = isCreate || !ref.get().await().exists()
+            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            val prev = dao.getMaterialById(docId)
             dao.upsertMaterials(
                 listOf(
                     CachedMaterialEntity(
@@ -922,10 +940,15 @@ class StudyHubRepository(
                         tagsCsv = item.tags.joinToString("|"),
                         important = item.important,
                         premiumOnly = item.premiumOnly,
-                        published = item.published
+                        published = item.published,
+                        downloadedOffline = prev?.downloadedOffline ?: false,
+                        downloadedAtMillis = prev?.downloadedAtMillis ?: 0L
                     )
                 )
             )
+            if (!isCreate) {
+                updateAttachmentsPublishedState(docId, item.published)
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -935,7 +958,69 @@ class StudyHubRepository(
         }
     }
 
-    suspend fun deleteStudyMaterial(materialId: String): Result<Unit> = deleteAdminDoc("study_materials", materialId)
+    suspend fun saveStudyMaterialWithAttachments(
+        item: StudyMaterial,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>
+    ): Result<Unit> {
+        val docId = item.id.ifBlank { "mat_${System.currentTimeMillis()}" }
+        return try {
+            requireUserId()
+            val finalSizeLabel = if (drafts.isNotEmpty()) {
+                AttachmentMediaHelper.buildAttachmentSummaryLabel(drafts, item.fileSizeLabel)
+            } else if (isCreate) {
+                "Notes"
+            } else {
+                item.fileSizeLabel.ifBlank { "Notes" }
+            }
+            val finalItem = item.copy(id = docId, fileSizeLabel = finalSizeLabel)
+            val ref = db.collection("study_materials").document(docId)
+            val writeAsCreate = isCreate || !ref.get().await().exists()
+            if (writeAsCreate) ref.set(finalItem.toWriteMap(true)).await() else ref.update(finalItem.toWriteMap(false)).await()
+            val prev = dao.getMaterialById(docId)
+            dao.upsertMaterials(
+                listOf(
+                    CachedMaterialEntity(
+                        id = docId,
+                        classGrade = finalItem.classGrade,
+                        subjectId = finalItem.subjectId,
+                        subjectName = finalItem.subjectName,
+                        chapterId = finalItem.chapterId,
+                        chapterTitle = finalItem.chapterTitle,
+                        title = finalItem.title,
+                        description = finalItem.description,
+                        materialType = finalItem.materialType,
+                        contentMarkdown = finalItem.contentMarkdown,
+                        fileSizeLabel = finalItem.fileSizeLabel,
+                        tagsCsv = finalItem.tags.joinToString("|"),
+                        important = finalItem.important,
+                        premiumOnly = finalItem.premiumOnly,
+                        published = finalItem.published,
+                        downloadedOffline = prev?.downloadedOffline ?: false,
+                        downloadedAtMillis = prev?.downloadedAtMillis ?: 0L
+                    )
+                )
+            )
+            syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "study_materials/$docId")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteStudyMaterial(materialId: String): Result<Unit> {
+        val res = deleteAdminDoc("study_materials", materialId)
+        if (res.isSuccess) {
+            deleteRemoteAttachmentsForParent(materialId)
+            dao.deleteMaterialById(materialId)
+            dao.deleteAttachmentsForParent(materialId)
+            AttachmentMediaHelper.deleteParentMediaCache(appContext, materialId)
+        }
+        return res
+    }
 
     suspend fun saveQuiz(item: QuizItem, isCreate: Boolean): Result<String> {
         val docId = item.id.ifBlank { "quiz_${System.currentTimeMillis()}" }
@@ -991,8 +1076,29 @@ class StudyHubRepository(
         return try {
             requireUserId()
             val ref = db.collection("exam_papers").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
-            dao.upsertExamPapers(listOf(CachedExamPaperEntity(docId, item.classGrade, item.subjectId, item.subjectName, item.title, item.paperCategory, item.year, item.fileSizeLabel, item.contentText, item.published)))
+            val writeAsCreate = isCreate || !ref.get().await().exists()
+            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            val prevPaper = dao.observeAllExamPapers().first().firstOrNull { it.id == docId }
+            dao.upsertExamPapers(
+                listOf(
+                    CachedExamPaperEntity(
+                        id = docId,
+                        classGrade = item.classGrade,
+                        subjectId = item.subjectId,
+                        subjectName = item.subjectName,
+                        title = item.title,
+                        paperCategory = item.paperCategory,
+                        year = item.year,
+                        fileSizeLabel = item.fileSizeLabel,
+                        contentText = item.contentText,
+                        published = item.published,
+                        downloadedOffline = prevPaper?.downloadedOffline ?: false
+                    )
+                )
+            )
+            if (!isCreate) {
+                updateAttachmentsPublishedState(docId, item.published)
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -1002,7 +1108,282 @@ class StudyHubRepository(
         }
     }
 
-    suspend fun deleteExamPaper(paperId: String): Result<Unit> = deleteAdminDoc("exam_papers", paperId)
+    suspend fun saveExamPaperWithAttachments(
+        item: ExamPaper,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>
+    ): Result<Unit> {
+        val docId = item.id.ifBlank { "paper_${System.currentTimeMillis()}" }
+        return try {
+            requireUserId()
+            val finalSizeLabel = if (drafts.isNotEmpty()) {
+                AttachmentMediaHelper.buildAttachmentSummaryLabel(drafts, item.fileSizeLabel)
+            } else if (isCreate || item.fileSizeLabel.contains("Image", true) || item.fileSizeLabel.contains("PDF", true)) {
+                "Text Blueprint"
+            } else {
+                item.fileSizeLabel.ifBlank { "Text Blueprint" }
+            }
+            val finalItem = item.copy(id = docId, fileSizeLabel = finalSizeLabel)
+            val ref = db.collection("exam_papers").document(docId)
+            val writeAsCreate = isCreate || !ref.get().await().exists()
+            if (writeAsCreate) ref.set(finalItem.toWriteMap(true)).await() else ref.update(finalItem.toWriteMap(false)).await()
+            val prevPaper = dao.observeAllExamPapers().first().firstOrNull { it.id == docId }
+            dao.upsertExamPapers(
+                listOf(
+                    CachedExamPaperEntity(
+                        id = docId,
+                        classGrade = finalItem.classGrade,
+                        subjectId = finalItem.subjectId,
+                        subjectName = finalItem.subjectName,
+                        title = finalItem.title,
+                        paperCategory = finalItem.paperCategory,
+                        year = finalItem.year,
+                        fileSizeLabel = finalItem.fileSizeLabel,
+                        contentText = finalItem.contentText,
+                        published = finalItem.published,
+                        downloadedOffline = prevPaper?.downloadedOffline ?: false
+                    )
+                )
+            )
+            syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "exam_papers/$docId")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteExamPaper(paperId: String): Result<Unit> {
+        val res = deleteAdminDoc("exam_papers", paperId)
+        if (res.isSuccess) {
+            deleteRemoteAttachmentsForParent(paperId)
+            dao.deleteExamPaperById(paperId)
+            dao.deleteAttachmentsForParent(paperId)
+            AttachmentMediaHelper.deleteParentMediaCache(appContext, paperId)
+        }
+        return res
+    }
+
+    suspend fun loadAttachmentsForParent(
+        parentId: String,
+        isAdmin: Boolean
+    ): Result<List<ResolvedPaperAttachment>> {
+        if (parentId.isBlank()) return Result.success(emptyList())
+        return try {
+            requireUserId()
+            val query = if (isAdmin) {
+                db.collection("paper_attachments").whereEqualTo("parentId", parentId)
+            } else {
+                db.collection("paper_attachments")
+                    .whereEqualTo("parentId", parentId)
+                    .whereEqualTo("published", true)
+            }
+            val chunks = query.get().await()
+                .toObjects(PaperAttachmentChunk::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+
+            if (chunks.isEmpty()) {
+                dao.deleteAttachmentsForParent(parentId)
+                return Result.success(emptyList())
+            }
+
+            val grouped = chunks.groupBy { it.groupId }
+            val resolved = ArrayList<ResolvedPaperAttachment>(grouped.size)
+            val entities = ArrayList<CachedPaperAttachmentEntity>(grouped.size)
+
+            for ((groupId, groupChunks) in grouped) {
+                val first = groupChunks.minByOrNull { it.chunkIndex } ?: continue
+                val file = AttachmentMediaHelper.decodeChunksToFile(
+                    context = appContext,
+                    parentId = parentId,
+                    groupId = groupId,
+                    fileName = first.fileName,
+                    chunks = groupChunks
+                )
+                resolved.add(
+                    ResolvedPaperAttachment(
+                        groupId = groupId,
+                        parentId = parentId,
+                        kind = first.kind,
+                        fileName = first.fileName,
+                        mimeType = first.mimeType,
+                        sizeBytes = first.sizeBytes,
+                        sortOrder = first.sortOrder,
+                        localFile = file
+                    )
+                )
+                entities.add(
+                    CachedPaperAttachmentEntity(
+                        groupId = groupId,
+                        parentId = parentId,
+                        kind = first.kind,
+                        fileName = first.fileName,
+                        mimeType = first.mimeType,
+                        sizeBytes = first.sizeBytes,
+                        sortOrder = first.sortOrder,
+                        localPath = file.absolutePath,
+                        published = first.published
+                    )
+                )
+            }
+
+            dao.deleteAttachmentsForParent(parentId)
+            dao.upsertPaperAttachments(entities)
+            Result.success(resolved.sortedBy { it.sortOrder })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val cached = dao.getAttachmentsForParentOnce(parentId)
+                .filter { (isAdmin || it.published) && File(it.localPath).exists() }
+                .map { it.toDomain() }
+                .sortedBy { it.sortOrder }
+            if (cached.isNotEmpty()) {
+                Result.success(cached)
+            } else {
+                handleFirestoreError(e, OperationType.LIST, "paper_attachments/$parentId")
+                Result.failure(e)
+            }
+        }
+    }
+
+    private suspend fun syncAttachmentsForParent(
+        parentId: String,
+        published: Boolean,
+        drafts: List<PaperAttachmentDraft>
+    ) {
+        val existingRemoteDocs = db.collection("paper_attachments")
+            .whereEqualTo("parentId", parentId)
+            .get()
+            .await()
+            .documents
+
+        val keepGroupIds = drafts.map { it.groupId }.toSet()
+        for (doc in existingRemoteDocs) {
+            val gId = doc.getString("groupId") ?: ""
+            if (gId !in keepGroupIds) {
+                doc.reference.delete().await()
+            }
+        }
+
+        val cachedEntities = ArrayList<CachedPaperAttachmentEntity>(drafts.size)
+        drafts.forEachIndexed { index, draft ->
+            val sortOrder = index.toLong()
+            val cachedFile = AttachmentMediaHelper.copyDraftToParentCache(appContext, parentId, draft)
+            if (draft.isExistingRemote) {
+                val matchingDocs = existingRemoteDocs.filter { it.getString("groupId") == draft.groupId }
+                if (matchingDocs.isNotEmpty()) {
+                    matchingDocs.forEach { doc ->
+                        doc.reference.update(
+                            mapOf(
+                                "published" to published,
+                                "sortOrder" to sortOrder,
+                                "fileName" to draft.fileName.take(180),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
+                    }
+                } else {
+                    uploadDraftChunks(parentId, published, sortOrder, draft, cachedFile)
+                }
+            } else {
+                uploadDraftChunks(parentId, published, sortOrder, draft, cachedFile)
+            }
+            cachedEntities.add(
+                CachedPaperAttachmentEntity(
+                    groupId = draft.groupId,
+                    parentId = parentId,
+                    kind = draft.kind,
+                    fileName = draft.fileName,
+                    mimeType = draft.mimeType,
+                    sizeBytes = draft.sizeBytes,
+                    sortOrder = sortOrder,
+                    localPath = cachedFile.absolutePath,
+                    published = published
+                )
+            )
+        }
+
+        dao.getAttachmentsForParentOnce(parentId)
+            .filter { it.groupId !in keepGroupIds }
+            .forEach { stale -> runCatching { File(stale.localPath).delete() } }
+        dao.deleteAttachmentsForParent(parentId)
+        if (cachedEntities.isNotEmpty()) {
+            dao.upsertPaperAttachments(cachedEntities)
+        }
+    }
+
+    private suspend fun uploadDraftChunks(
+        parentId: String,
+        published: Boolean,
+        sortOrder: Long,
+        draft: PaperAttachmentDraft,
+        sourceFile: File
+    ) {
+        val fileToRead = if (sourceFile.exists()) sourceFile else draft.previewFile
+        val chunks = AttachmentMediaHelper.chunkFileToBase64(fileToRead)
+        if (chunks.isEmpty()) {
+            throw IllegalStateException("Attachment ${draft.fileName} is empty.")
+        }
+        if (chunks.size > 20) {
+            throw IllegalStateException("Attachment ${draft.fileName} exceeds maximum size limit.")
+        }
+        val totalChunks = chunks.size.toLong()
+        chunks.forEachIndexed { idx, base64 ->
+            val chunkDocId = "${draft.groupId}_c$idx"
+            val chunkObj = PaperAttachmentChunk(
+                id = chunkDocId,
+                parentId = parentId,
+                groupId = draft.groupId,
+                kind = draft.kind,
+                fileName = draft.fileName,
+                mimeType = draft.mimeType,
+                sizeBytes = draft.sizeBytes,
+                chunkIndex = idx.toLong(),
+                totalChunks = totalChunks,
+                sortOrder = sortOrder,
+                published = published,
+                dataBase64 = base64
+            )
+            db.collection("paper_attachments")
+                .document(chunkDocId)
+                .set(chunkObj.toWriteMap(isCreate = true))
+                .await()
+        }
+    }
+
+    private suspend fun updateAttachmentsPublishedState(parentId: String, published: Boolean) {
+        runCatching {
+            val remoteDocs = db.collection("paper_attachments")
+                .whereEqualTo("parentId", parentId)
+                .get()
+                .await()
+                .documents
+            remoteDocs.forEach { doc ->
+                doc.reference.update(
+                    mapOf(
+                        "published" to published,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            val local = dao.getAttachmentsForParentOnce(parentId)
+            if (local.isNotEmpty()) {
+                dao.upsertPaperAttachments(local.map { it.copy(published = published) })
+            }
+        }
+    }
+
+    private suspend fun deleteRemoteAttachmentsForParent(parentId: String) {
+        runCatching {
+            val remoteDocs = db.collection("paper_attachments")
+                .whereEqualTo("parentId", parentId)
+                .get()
+                .await()
+                .documents
+            remoteDocs.forEach { it.reference.delete().await() }
+        }
+    }
 
     suspend fun sendAnnouncement(item: AnnouncementItem): Result<Unit> {
         val docId = item.id.ifBlank { "ann_${System.currentTimeMillis()}" }

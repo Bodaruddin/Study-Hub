@@ -318,3 +318,94 @@ test("Admin can manage app_settings with Ad Management fields while students can
   );
 });
 
+test("Admin can update exam_papers and manage PDF/image paper_attachments while students can only read published attachments", async () => {
+  const realAdminDb = testEnv.authenticatedContext(ADMIN_UID, {
+    email: ADMIN_EMAIL,
+    email_verified: true,
+  }).firestore();
+  const studentDb = testEnv.authenticatedContext(STUDENT_A, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const ts = pastDate();
+
+  await assertSucceeds(
+    realAdminDb.collection("exam_papers").doc("paper_2026_sci").set({
+      classGrade: 7,
+      subjectId: "sub_science_7",
+      subjectName: "Science",
+      title: "Class 7 Science Model Paper",
+      paperCategory: "model_paper",
+      year: 2026,
+      fileSizeLabel: "PDF • 320 KB",
+      contentText: "Section A: MCQs",
+      published: true,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    realAdminDb.collection("exam_papers").doc("paper_2026_sci").update({
+      title: "Class 7 Science Updated Paper",
+      fileSizeLabel: "PDF + 1 Image • 440 KB",
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  await assertSucceeds(
+    realAdminDb.collection("paper_attachments").doc("att_pdf_1_c0").set({
+      parentId: "paper_2026_sci",
+      groupId: "att_pdf_1",
+      kind: "pdf",
+      fileName: "science_2026.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 320000,
+      chunkIndex: 0,
+      totalChunks: 1,
+      sortOrder: 0,
+      published: true,
+      dataBase64: "JVBERi0xLjQK",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    realAdminDb.collection("paper_attachments").doc("att_img_draft_c0").set({
+      parentId: "paper_2026_sci",
+      groupId: "att_img_draft",
+      kind: "image",
+      fileName: "page_1.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 95000,
+      chunkIndex: 0,
+      totalChunks: 1,
+      sortOrder: 1,
+      published: false,
+      dataBase64: "/9j/4AAQ",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  await assertSucceeds(
+    studentDb.collection("paper_attachments")
+      .where("parentId", "==", "paper_2026_sci")
+      .where("published", "==", true)
+      .get()
+  );
+  await assertFails(
+    studentDb.collection("paper_attachments").where("parentId", "==", "paper_2026_sci").get()
+  );
+  await assertFails(
+    studentDb.collection("paper_attachments").doc("att_img_draft_c0").get()
+  );
+  await assertFails(
+    studentDb.collection("paper_attachments").doc("att_pdf_1_c0").delete()
+  );
+
+  await assertSucceeds(realAdminDb.collection("paper_attachments").doc("att_img_draft_c0").delete());
+});
+
+

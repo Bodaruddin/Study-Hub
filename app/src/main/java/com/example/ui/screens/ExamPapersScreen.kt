@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -60,7 +61,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.AppSettings
 import com.example.data.model.ExamPaper
 import com.example.data.model.PaperCategory
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.ui.components.EthicalAdFreeUpgradeBanner
+import com.example.ui.components.PaperAttachmentGallery
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.ElectricPurple
@@ -76,6 +79,7 @@ fun ExamPapersScreen(
     onSelectClass: (Long) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>> = { Result.success(emptyList()) },
     appSettings: AppSettings = AppSettings(),
     isPremiumUser: Boolean = false,
     onOpenPremium: () -> Unit = {}
@@ -103,18 +107,26 @@ fun ExamPapersScreen(
             onDismissRequest = { viewingPaper = null },
             title = { Text(viewingPaper!!.title, fontWeight = FontWeight.Bold) },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text(
-                        text = "${viewingPaper!!.subjectName} • Year ${viewingPaper!!.year} • ${viewingPaper!!.fileSizeLabel}",
+                        text = "Class ${viewingPaper!!.classGrade} • ${viewingPaper!!.subjectName} • Year ${viewingPaper!!.year} • ${viewingPaper!!.fileSizeLabel}",
                         style = MaterialTheme.typography.labelMedium,
                         color = ElectricPurple
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = viewingPaper!!.contentText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        lineHeight = 20.sp
+                    PaperAttachmentGallery(
+                        parentId = viewingPaper!!.id,
+                        onLoadAttachments = onLoadAttachments
                     )
+                    if (viewingPaper!!.contentText.isNotBlank()) {
+                        Text(
+                            text = viewingPaper!!.contentText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 20.sp
+                        )
+                    }
                 }
             },
             confirmButton = {

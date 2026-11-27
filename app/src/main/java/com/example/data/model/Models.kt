@@ -447,3 +447,60 @@ data class AppSettings(
         put("updatedAt", FieldValue.serverTimestamp())
     }
 }
+
+@Keep
+@IgnoreExtraProperties
+data class PaperAttachmentChunk(
+    @DocumentId val id: String = "",
+    val parentId: String = "",
+    val groupId: String = "",
+    val kind: String = "image",
+    val fileName: String = "",
+    val mimeType: String = "image/jpeg",
+    val sizeBytes: Long = 0L,
+    val chunkIndex: Long = 0L,
+    val totalChunks: Long = 1L,
+    val sortOrder: Long = 0L,
+    val published: Boolean = true,
+    val dataBase64: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun toWriteMap(isCreate: Boolean): Map<String, Any> = buildMap {
+        put("parentId", parentId.take(128))
+        put("groupId", groupId.take(128))
+        put("kind", if (kind == "pdf") "pdf" else "image")
+        put("fileName", fileName.take(180).ifBlank { "attachment" })
+        put("mimeType", mimeType.take(80).ifBlank { "application/octet-stream" })
+        put("sizeBytes", sizeBytes.coerceIn(1L, 6_000_000L))
+        put("chunkIndex", chunkIndex.coerceIn(0L, 20L))
+        put("totalChunks", totalChunks.coerceIn(1L, 20L))
+        put("sortOrder", sortOrder.coerceIn(0L, 100L))
+        put("published", published)
+        put("dataBase64", dataBase64.take(750_000))
+        if (isCreate) put("createdAt", FieldValue.serverTimestamp())
+        put("updatedAt", FieldValue.serverTimestamp())
+    }
+}
+
+data class PaperAttachmentDraft(
+    val groupId: String,
+    val kind: String,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val previewFile: java.io.File,
+    val isExistingRemote: Boolean = false
+)
+
+data class ResolvedPaperAttachment(
+    val groupId: String,
+    val parentId: String,
+    val kind: String,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val sortOrder: Long,
+    val localFile: java.io.File
+)
+

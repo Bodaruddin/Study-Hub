@@ -10,9 +10,11 @@ import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizItem
 import com.example.data.model.QuizQuestion
 import com.example.data.model.ReadingProgressRecord
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
+import java.io.File
 
 @Entity(tableName = "cached_classes")
 data class CachedClassEntity(
@@ -291,3 +293,27 @@ data class PendingSyncEntity(
     val retryCount: Int = 0,
     val lastError: String = ""
 )
+
+@Entity(tableName = "cached_paper_attachments")
+data class CachedPaperAttachmentEntity(
+    @PrimaryKey val groupId: String,
+    val parentId: String,
+    val kind: String,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val sortOrder: Long,
+    val localPath: String,
+    val published: Boolean
+) {
+    fun toDomain() = ResolvedPaperAttachment(
+        groupId = groupId,
+        parentId = parentId,
+        kind = kind,
+        fileName = fileName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        sortOrder = sortOrder,
+        localFile = File(localPath)
+    )
+}

@@ -8,11 +8,13 @@ import com.example.data.model.BookmarkRecord
 import com.example.data.model.ChapterItem
 import com.example.data.model.DownloadRecord
 import com.example.data.model.ExamPaper
+import com.example.data.model.PaperAttachmentDraft
 import com.example.data.model.QuestionType
 import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizItem
 import com.example.data.model.QuizQuestion
 import com.example.data.model.ReadingProgressRecord
+import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
@@ -522,6 +524,25 @@ class StudyHubViewModel(
         }
     }
 
+    fun saveStudyMaterialWithAttachments(
+        item: StudyMaterial,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.saveStudyMaterialWithAttachments(item, isCreate, drafts)
+                .onSuccess {
+                    _snackbarMessage.value = if (item.published) "Material published" else "Saved as draft"
+                    onResult(true)
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.message ?: "Failed to save material"
+                    onResult(false)
+                }
+        }
+    }
+
     fun toggleMaterialPublish(item: StudyMaterial) {
         saveStudyMaterial(item.copy(published = !item.published), isCreate = false)
     }
@@ -558,10 +579,44 @@ class StudyHubViewModel(
     fun saveExamPaper(item: ExamPaper, isCreate: Boolean) {
         viewModelScope.launch {
             repository.saveExamPaper(item, isCreate)
-                .onSuccess { _snackbarMessage.value = "Exam paper saved" }
+                .onSuccess { _snackbarMessage.value = if (item.published) "Exam paper published" else "Exam paper saved as draft" }
                 .onFailure { _snackbarMessage.value = it.message ?: "Failed to save exam paper" }
         }
     }
+
+    fun saveExamPaperWithAttachments(
+        item: ExamPaper,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.saveExamPaperWithAttachments(item, isCreate, drafts)
+                .onSuccess {
+                    _snackbarMessage.value = if (isCreate) "Question paper published" else "Question paper updated"
+                    onResult(true)
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.message ?: "Failed to save question paper"
+                    onResult(false)
+                }
+        }
+    }
+
+    fun toggleExamPaperPublish(paper: ExamPaper) {
+        saveExamPaper(paper.copy(published = !paper.published), isCreate = false)
+    }
+
+    fun deleteExamPaper(paperId: String) {
+        viewModelScope.launch {
+            repository.deleteExamPaper(paperId)
+                .onSuccess { _snackbarMessage.value = "Question paper deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
+        }
+    }
+
+    suspend fun loadAttachmentsForParent(parentId: String): Result<List<ResolvedPaperAttachment>> =
+        repository.loadAttachmentsForParent(parentId, isAdmin = isAuthorizedAdmin)
 
     fun sendAnnouncement(title: String, message: String, targetClass: Long, priority: String) {
         viewModelScope.launch {
