@@ -11,14 +11,14 @@ object SupabaseSchemaSql {
             user_id text not null,
             display_name text not null default 'Student',
             email text not null default '',
-            selected_class bigint not null default 7,
-            role text not null default 'student',
-            subscription_tier text not null default 'free',
-            avg_score bigint not null default 87,
-            day_streak bigint not null default 15,
-            points bigint not null default 120,
-            daily_goal_count bigint not null default 5,
-            daily_completed_count bigint not null default 3,
+            selected_class bigint not null default 7 check (selected_class between 6 and 12),
+            role text not null default 'student' check (role in ('student', 'admin')),
+            subscription_tier text not null default 'free' check (subscription_tier in ('free', 'premium')),
+            avg_score bigint not null default 87 check (avg_score between 0 and 100),
+            day_streak bigint not null default 15 check (day_streak >= 0),
+            points bigint not null default 120 check (points >= 0),
+            daily_goal_count bigint not null default 5 check (daily_goal_count between 1 and 50),
+            daily_completed_count bigint not null default 3 check (daily_completed_count between 0 and 100),
             dark_theme_enabled boolean not null default false,
             notifications_enabled boolean not null default true,
             exam_reminders_enabled boolean not null default true,
@@ -265,5 +265,34 @@ object SupabaseSchemaSql {
         alter table public.quiz_attempts disable row level security;
         alter table public.reading_progress disable row level security;
         alter table public.downloads disable row level security;
+
+        -- =====================================================================
+        -- RECOMMENDED FOR PRODUCTION LAUNCH:
+        -- 1) In Supabase Dashboard -> Authentication -> Third-Party Auth, link Firebase Auth.
+        -- 2) Update client requests to send the Firebase ID token in Authorization: Bearer <jwt>.
+        -- 3) Run the RLS policies below in SQL Editor to enforce server-side isolation:
+        --
+        -- alter table public.user_profiles enable row level security;
+        -- create policy "Own profile only" on public.user_profiles
+        --   for all to authenticated
+        --   using (id = (auth.jwt() ->> 'sub'))
+        --   with check (id = (auth.jwt() ->> 'sub'));
+        --
+        -- alter table public.bookmarks enable row level security;
+        -- create policy "Own bookmarks" on public.bookmarks for all to authenticated
+        --   using (user_id = (auth.jwt() ->> 'sub')) with check (user_id = (auth.jwt() ->> 'sub'));
+        --
+        -- alter table public.quiz_attempts enable row level security;
+        -- create policy "Own attempts" on public.quiz_attempts for all to authenticated
+        --   using (user_id = (auth.jwt() ->> 'sub')) with check (user_id = (auth.jwt() ->> 'sub'));
+        --
+        -- alter table public.reading_progress enable row level security;
+        -- create policy "Own progress" on public.reading_progress for all to authenticated
+        --   using (user_id = (auth.jwt() ->> 'sub')) with check (user_id = (auth.jwt() ->> 'sub'));
+        --
+        -- alter table public.downloads enable row level security;
+        -- create policy "Own downloads" on public.downloads for all to authenticated
+        --   using (user_id = (auth.jwt() ->> 'sub')) with check (user_id = (auth.jwt() ->> 'sub'));
+        -- =====================================================================
     """.trimIndent()
 }

@@ -20,17 +20,52 @@ import kotlinx.coroutines.withContext
 
 object AttachmentMediaHelper {
     private const val MAX_PDF_BYTES = 5_000_000 // ~11 chunks max (well within 20-chunk rule)
+    private const val MAX_DECODED_BYTES = 6_000_000L
+    private const val MAX_CHUNKS = 20
     private const val CHUNK_BINARY_BYTES = 450_000 // ~600k Base64 chars (< 750k limit)
     private const val MAX_IMAGE_DIM_PX = 1280
 
+    private fun mediaRootDir(context: Context): File =
+        File(context.filesDir, "paper_media").apply { mkdirs() }
+
     private fun draftsDir(context: Context): File =
-        File(context.filesDir, "paper_media/drafts").apply { mkdirs() }
+        requireWithinDir(mediaRootDir(context), File(mediaRootDir(context), "drafts")).apply { mkdirs() }
 
-    fun mediaDirForParent(context: Context, parentId: String): File =
-        File(context.filesDir, "paper_media/${sanitizeSegment(parentId)}").apply { mkdirs() }
+    fun mediaDirForParent(context: Context, parentId: String): File {
+        val root = mediaRootDir(context)
+        val safeParent = sanitizeSegment(parentId)
+        return requireWithinDir(root, File(root, safeParent)).apply { mkdirs() }
+    }
 
-    private fun sanitizeSegment(raw: String): String =
-        raw.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "file" }
+    fun sanitizeSegment(raw: String): String {
+        val cleaned = raw
+            .trim()
+            .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            .replace(Regex("\\.{2,}"), "_")
+            .trimStart('.', '_')
+        return if (cleaned.isBlank() || cleaned == "." || cleaned == "..") "file" else cleaned.take(120)
+    }
+
+    internal fun requireWithinDir(baseDir: File, target: File): File {
+        val baseCanonical = baseDir.canonicalFile
+        val targetCanonical = target.canonicalFile
+        val basePrefix = if (baseCanonical.path.endsWith(File.separator)) {
+            baseCanonical.path
+        } else {
+            baseCanonical.path + File.separator
+        }
+        require(targetCanonical.path.startsWith(basePrefix)) {
+            "Blocked path outside attachment storage directory."
+        }
+        return targetCanonical
+    }
+
+    internal fun hasPdfHeader(bytes: ByteArray): Boolean {
+        if (bytes.size < 5) return false
+        val scanLimit = min(bytes.size, 1024)
+        val header = String(bytes, 0, scanLimit, Charsets.US_ASCII)
+        return header.contains("%PDF-")
+    }
 
     private fun queryDisplayName(context: Context, uri: Uri, fallback: String): String {
         val resolver = context.contentResolver
@@ -69,9 +104,13 @@ object AttachmentMediaHelper {
                 if (bytes.isEmpty()) {
                     throw IllegalStateException("Selected PDF file is empty.")
                 }
+                if (!hasPdfHeader(bytes)) {
+                    throw IllegalArgumentException("Selected file is not a valid PDF document.")
+                }
 
                 val groupId = "att_pdf_${System.currentTimeMillis()}"
-                val outFile = File(draftsDir(context), "${groupId}_${sanitizeSegment(safeName)}")
+                val drafts = draftsDir(context)
+                val outFile = requireWithinDir(drafts, File(drafts, "${groupId}_${sanitizeSegment(safeName)}"))
                 outFile.writeBytes(bytes)
 
                 PaperAttachmentDraft(
@@ -132,7 +171,8 @@ object AttachmentMediaHelper {
                 scaled.recycle()
 
                 val groupId = "att_img_${System.currentTimeMillis()}_$indexSuffix"
-                val outFile = File(draftsDir(context), "${groupId}_${sanitizeSegment(safeName)}")
+                val drafts = draftsDir(context)
+                val outFile = requireWithinDir(drafts, File(drafts, "${groupId}_${sanitizeSegment(safeName)}"))
                 outFile.writeBytes(jpegBytes)
 
                 PaperAttachmentDraft(
@@ -179,17 +219,33 @@ object AttachmentMediaHelper {
         fileName: String,
         chunks: List<PaperAttachmentChunk>
     ): File {
+        require(chunks.isNotEmpty() && chunks.size <= MAX_CHUNKS) {
+            "Attachment chunk count out of allowed range."
+        }
         val targetDir = mediaDirForParent(context, parentId)
-        val outFile = File(targetDir, "${sanitizeSegment(groupId)}_${sanitizeSegment(fileName)}")
+        val outFile = requireWithinDir(
+            targetDir,
+            File(targetDir, "${sanitizeSegment(groupId)}_${sanitizeSegment(fileName)}")
+        )
         if (outFile.exists() && outFile.length() > 0L) {
             return outFile
         }
         val sorted = chunks.sortedBy { it.chunkIndex }
-        outFile.outputStream().use { fos ->
-            sorted.forEach { chunk ->
-                val decoded = Base64.decode(chunk.dataBase64, Base64.DEFAULT)
-                fos.write(decoded)
+        var totalWritten = 0L
+        try {
+            outFile.outputStream().use { fos ->
+                sorted.forEach { chunk ->
+                    val decoded = Base64.decode(chunk.dataBase64, Base64.DEFAULT)
+                    totalWritten += decoded.size
+                    if (totalWritten > MAX_DECODED_BYTES) {
+                        throw IllegalStateException("Attachment exceeds maximum allowed decoded size.")
+                    }
+                    fos.write(decoded)
+                }
             }
+        } catch (e: Exception) {
+            runCatching { outFile.delete() }
+            throw e
         }
         return outFile
     }
@@ -200,17 +256,25 @@ object AttachmentMediaHelper {
         draft: PaperAttachmentDraft
     ): File {
         val targetDir = mediaDirForParent(context, parentId)
-        val outFile = File(targetDir, "${sanitizeSegment(draft.groupId)}_${sanitizeSegment(draft.fileName)}")
-        if (draft.previewFile.absolutePath != outFile.absolutePath && draft.previewFile.exists()) {
+        val outFile = requireWithinDir(
+            targetDir,
+            File(targetDir, "${sanitizeSegment(draft.groupId)}_${sanitizeSegment(draft.fileName)}")
+        )
+        if (draft.previewFile.canonicalPath != outFile.canonicalPath && draft.previewFile.exists()) {
             draft.previewFile.copyTo(outFile, overwrite = true)
         }
         return outFile
     }
 
     fun deleteParentMediaCache(context: Context, parentId: String) {
+        if (parentId.isBlank()) return
         runCatching {
-            val dir = File(context.filesDir, "paper_media/${sanitizeSegment(parentId)}")
-            if (dir.exists()) dir.deleteRecursively()
+            val root = mediaRootDir(context)
+            val safeParent = sanitizeSegment(parentId)
+            val dir = requireWithinDir(root, File(root, safeParent))
+            if (dir != root.canonicalFile && dir.exists()) {
+                dir.deleteRecursively()
+            }
         }
     }
 

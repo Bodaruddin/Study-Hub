@@ -54,18 +54,21 @@ class StudyHubRepository(
     private val profileRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     private val cloudRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
 
+    @Volatile
+    private var verifiedAdminUid: String? = null
+
     fun isSupabaseConfigured(): Boolean = supabase.isConfigured()
 
     fun getSupabaseConnectionStatus(): SupabaseConnectionStatus = supabase.connectionStatus()
 
     suspend fun testSupabaseConnection(url: String, anonKey: String): SupabaseTestResult {
-        requireUserId()
+        requireAdmin()
         return supabase.testConnection(urlOverride = url, anonKeyOverride = anonKey)
     }
 
     suspend fun saveManualSupabaseConfig(url: String, anonKey: String): Result<SupabaseTestResult> {
         return try {
-            requireUserId()
+            requireAdmin()
             supabase.saveManualConfig(url, anonKey)
             val test = supabase.testConnection()
             if (test.connected && test.schemaReady) {
@@ -83,6 +86,7 @@ class StudyHubRepository(
     }
 
     fun clearManualSupabaseConfig(): SupabaseConnectionStatus {
+        requireAdmin()
         supabase.clearManualConfig()
         return supabase.connectionStatus()
     }
@@ -95,6 +99,20 @@ class StudyHubRepository(
         email != null &&
             BOOTSTRAP_ADMIN_EMAILS.any { it.equals(email, ignoreCase = true) } &&
             (auth.currentUser?.isEmailVerified == true)
+
+    fun isCurrentUserAdmin(): Boolean {
+        val user = auth.currentUser ?: return false
+        return isVerifiedAdminEmail(user.email) || verifiedAdminUid == user.uid
+    }
+
+    private fun requireAdmin(): String {
+        val user = auth.currentUser
+            ?: throw SecurityException("User must be signed in before accessing StudyHub admin controls.")
+        if (!isVerifiedAdminEmail(user.email) && verifiedAdminUid != user.uid) {
+            throw SecurityException("Admin privileges required for this operation.")
+        }
+        return user.uid
+    }
 
     suspend fun ensureLocalSeedData() {
         syncHelper.ensureLocalSeedData(force = false)
@@ -131,6 +149,7 @@ class StudyHubRepository(
             )
 
             if (!supabase.isConfigured()) {
+                verifiedAdminUid = if (fallbackRole == "admin") uid else null
                 return Result.success(defaultProfile)
             }
 
@@ -150,9 +169,11 @@ class StudyHubRepository(
                 } else {
                     existing
                 }
+                verifiedAdminUid = if (promoted.role == "admin" || isVerifiedAdminEmail(email)) uid else null
                 Result.success(promoted)
             } else {
                 supabase.upsertOne("user_profiles", defaultProfile.toSupabaseJson(uid))
+                verifiedAdminUid = if (defaultProfile.role == "admin") uid else null
                 Result.success(defaultProfile)
             }
         } catch (e: CancellationException) {
@@ -170,7 +191,11 @@ class StudyHubRepository(
         suspend fun fetchOnce(): UserProfile? {
             if (!supabase.isConfigured()) return null
             val rows = supabase.select("user_profiles", mapOf("id" to "eq.$uid"), limit = 1)
-            return if (rows.length() > 0) SupabaseMappers.userProfileFromJson(rows.getJSONObject(0)) else null
+            val profile = if (rows.length() > 0) SupabaseMappers.userProfileFromJson(rows.getJSONObject(0)) else null
+            if (profile != null) {
+                verifiedAdminUid = if (profile.role == "admin" || isVerifiedAdminEmail(auth.currentUser?.email)) uid else null
+            }
+            return profile
         }
 
         runCatching { fetchOnce() }.onSuccess { emit(it) }
@@ -271,7 +296,8 @@ class StudyHubRepository(
         requireUserId()
         suspend fun fetchList(): List<AnnouncementItem> {
             if (!supabase.isConfigured()) return SeedCurriculumData.defaultAnnouncements
-            val filters = if (isAdmin) emptyMap() else mapOf("published" to "eq.true")
+            val effectiveAdmin = isAdmin && isCurrentUserAdmin()
+            val filters = if (effectiveAdmin) emptyMap() else mapOf("published" to "eq.true")
             val arr = supabase.select("announcements", filters, order = "created_at.desc")
             val parsed = (0 until arr.length()).map { i ->
                 SupabaseMappers.announcementFromJson(arr.getJSONObject(i))
@@ -311,7 +337,8 @@ class StudyHubRepository(
 
     suspend fun syncCurriculumFromCloud(isAdmin: Boolean): Result<Unit> {
         requireUserId()
-        val res = syncHelper.syncCurriculumFromCloud(isAdmin)
+        val effectiveAdmin = isAdmin && isCurrentUserAdmin()
+        val res = syncHelper.syncCurriculumFromCloud(effectiveAdmin)
         cloudRefreshTrigger.tryEmit(Unit)
         return res
     }
@@ -325,6 +352,8 @@ class StudyHubRepository(
     // Student Offline-First Mutations (Immediate Room write + Queued Sync to Supabase)
     suspend fun toggleBookmarkOfflineFirst(uid: String, material: StudyMaterial, currentlyBookmarked: Boolean): Result<Unit> {
         return try {
+            val activeUid = requireUserId()
+            check(activeUid == uid) { "Cannot modify bookmarks for another user." }
             val docId = "bm_${material.id}"
             val syncKey = "bookmark_${uid}_${material.id}"
             if (currentlyBookmarked) {
@@ -393,6 +422,8 @@ class StudyHubRepository(
 
     suspend fun toggleDownloadOfflineFirst(uid: String, material: StudyMaterial, currentlyDownloaded: Boolean): Result<Unit> {
         return try {
+            val activeUid = requireUserId()
+            check(activeUid == uid) { "Cannot modify downloads for another user." }
             val docId = "dl_${material.id}"
             val syncKey = "download_${uid}_${material.id}"
             val now = System.currentTimeMillis()
@@ -451,10 +482,13 @@ class StudyHubRepository(
     }
 
     suspend fun toggleExamPaperDownload(paper: ExamPaper, currentlyDownloaded: Boolean) {
+        requireUserId()
         dao.setExamPaperDownloaded(paper.id, !currentlyDownloaded)
     }
 
     suspend fun recordReadingProgressOfflineFirst(uid: String, material: StudyMaterial, progressPercent: Long) {
+        val activeUid = requireUserId()
+        check(activeUid == uid) { "Cannot modify reading progress for another user." }
         val docId = "prog_${material.id}"
         val now = System.currentTimeMillis()
         dao.upsertReadingProgress(
@@ -501,6 +535,8 @@ class StudyHubRepository(
         pointsEarned: Int
     ): Result<Unit> {
         return try {
+            val activeUid = requireUserId()
+            check(activeUid == uid) { "Cannot record quiz attempt for another user." }
             val now = System.currentTimeMillis()
             val attemptId = "att_${quiz.id}_$now"
             val scorePercent = if (totalQuestions > 0) ((correctAnswers * 100) / totalQuestions).toLong() else 0L
@@ -554,12 +590,12 @@ class StudyHubRepository(
 
     // Admin CRUD & Seeding Operations
     suspend fun seedCurriculumToCloudIfEmpty(): Result<Unit> {
-        requireUserId()
+        requireAdmin()
         return syncHelper.seedCurriculumToCloudIfEmpty()
     }
 
     suspend fun seedOrRepairCloudCurriculum(): Result<Int> {
-        requireUserId()
+        requireAdmin()
         val res = syncHelper.seedOrRepairCloudCurriculum()
         if (res.isSuccess) cloudRefreshTrigger.tryEmit(Unit)
         return res
@@ -567,6 +603,7 @@ class StudyHubRepository(
 
     suspend fun resetLocalCacheAndResync(isAdmin: Boolean): Result<Unit> {
         return try {
+            requireUserId()
             dao.clearCurriculumCache()
             syncHelper.ensureLocalSeedData(force = true)
             syncCurriculumFromCloud(isAdmin)
@@ -580,7 +617,7 @@ class StudyHubRepository(
     suspend fun saveSchoolClass(item: SchoolClass, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "class_${item.grade}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("classes", item.toSupabaseJson(docId))
                 syncHelper.markCloudSeedDone()
@@ -599,7 +636,7 @@ class StudyHubRepository(
     suspend fun deleteSchoolClass(classId: String): Result<Unit> {
         if (classId.isBlank()) return Result.failure(IllegalArgumentException("Invalid class ID"))
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.deleteWhere("classes", mapOf("id" to "eq.$classId"))
                 syncHelper.markCloudSeedDone()
@@ -618,7 +655,7 @@ class StudyHubRepository(
     suspend fun saveSubject(item: SubjectItem, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "sub_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("subjects", item.toSupabaseJson(docId))
             }
@@ -641,7 +678,7 @@ class StudyHubRepository(
     suspend fun saveChapter(item: ChapterItem, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "chap_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("chapters", item.toSupabaseJson(docId))
             }
@@ -665,7 +702,7 @@ class StudyHubRepository(
     ): Result<Unit> {
         val docId = item.id.ifBlank { "chap_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             val finalItem = item.copy(id = docId)
             if (supabase.isConfigured()) {
                 supabase.upsertOne("chapters", finalItem.toSupabaseJson(docId))
@@ -712,7 +749,7 @@ class StudyHubRepository(
     suspend fun saveStudyMaterial(item: StudyMaterial, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "mat_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("study_materials", item.toSupabaseJson(docId))
             }
@@ -759,7 +796,7 @@ class StudyHubRepository(
     ): Result<Unit> {
         val docId = item.id.ifBlank { "mat_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             val finalSizeLabel = if (drafts.isNotEmpty()) {
                 AttachmentMediaHelper.buildAttachmentSummaryLabel(drafts, item.fileSizeLabel)
             } else if (isCreate) {
@@ -819,7 +856,7 @@ class StudyHubRepository(
     suspend fun saveQuiz(item: QuizItem, isCreate: Boolean): Result<String> {
         val docId = item.id.ifBlank { "quiz_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("quizzes", item.toSupabaseJson(docId))
             }
@@ -837,7 +874,7 @@ class StudyHubRepository(
         val qId = question.id.ifBlank { "q_${System.currentTimeMillis()}" }
         val path = "quiz_questions/$qId"
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("quiz_questions", question.toSupabaseJson(qId))
             }
@@ -869,7 +906,7 @@ class StudyHubRepository(
     suspend fun saveExamPaper(item: ExamPaper, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "paper_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("exam_papers", item.toSupabaseJson(docId))
             }
@@ -910,7 +947,7 @@ class StudyHubRepository(
     ): Result<Unit> {
         val docId = item.id.ifBlank { "paper_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             val finalSizeLabel = if (drafts.isNotEmpty()) {
                 AttachmentMediaHelper.buildAttachmentSummaryLabel(drafts, item.fileSizeLabel)
             } else if (isCreate || item.fileSizeLabel.contains("Image", true) || item.fileSizeLabel.contains("PDF", true)) {
@@ -966,13 +1003,14 @@ class StudyHubRepository(
         isAdmin: Boolean
     ): Result<List<ResolvedPaperAttachment>> {
         requireUserId()
-        return syncHelper.loadAttachmentsForParent(parentId, isAdmin)
+        val effectiveAdmin = isAdmin && isCurrentUserAdmin()
+        return syncHelper.loadAttachmentsForParent(parentId, effectiveAdmin)
     }
 
     suspend fun sendAnnouncement(item: AnnouncementItem): Result<Unit> {
         val docId = item.id.ifBlank { "ann_${System.currentTimeMillis()}" }
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("announcements", item.toSupabaseJson(docId))
                 cloudRefreshTrigger.tryEmit(Unit)
@@ -989,7 +1027,7 @@ class StudyHubRepository(
     suspend fun saveAppSettings(settings: AppSettings): Result<Unit> {
         val docId = "global"
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.upsertOne("app_settings", settings.toSupabaseJson())
                 cloudRefreshTrigger.tryEmit(Unit)
@@ -1005,7 +1043,7 @@ class StudyHubRepository(
 
     suspend fun fetchAllUsersForAdmin(): Result<List<UserProfile>> {
         return try {
-            requireUserId()
+            requireAdmin()
             if (!supabase.isConfigured()) return Result.success(emptyList())
             val arr = supabase.select("user_profiles", order = "created_at.desc")
             val list = (0 until arr.length()).map { i ->
@@ -1022,7 +1060,7 @@ class StudyHubRepository(
 
     private suspend fun deleteAdminRow(table: String, id: String): Result<Unit> {
         return try {
-            requireUserId()
+            requireAdmin()
             if (supabase.isConfigured()) {
                 supabase.deleteWhere(table, mapOf("id" to "eq.$id"))
             }

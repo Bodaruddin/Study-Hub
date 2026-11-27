@@ -282,8 +282,8 @@ fun ProfileScreen(
                         color = ElectricPurple
                     )
                     Text(
-                        "• We collect only your Google Sign-In display name, email, selected class (6–12), and study progress.\n" +
-                            "• Student records are strictly isolated per user account with Firebase security rules.\n" +
+                        "• We collect only your Google/Email Sign-In display name, email, selected class (6–12), and study progress.\n" +
+                            "• Student records are isolated per authenticated account with role checks and encrypted local configuration.\n" +
                             "• No personalized behavioral ads are shown to student accounts.\n" +
                             "• You may delete all your cloud and local data anytime from Profile → Delete Account.",
                         style = MaterialTheme.typography.bodySmall

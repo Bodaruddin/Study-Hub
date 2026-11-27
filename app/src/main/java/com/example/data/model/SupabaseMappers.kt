@@ -99,22 +99,34 @@ object SupabaseMappers {
 
     fun userProfilePatchToSnakeCase(fields: Map<String, Any>): JSONObject = JSONObject().apply {
         fields.forEach { (key, value) ->
-            val col = when (key) {
-                "displayName" -> "display_name"
-                "selectedClass" -> "selected_class"
-                "subscriptionTier" -> "subscription_tier"
-                "avgScore" -> "avg_score"
-                "dayStreak" -> "day_streak"
-                "dailyGoalCount" -> "daily_goal_count"
-                "dailyCompletedCount" -> "daily_completed_count"
-                "darkThemeEnabled" -> "dark_theme_enabled"
-                "notificationsEnabled" -> "notifications_enabled"
-                "examRemindersEnabled" -> "exam_reminders_enabled"
-                "newMaterialsEnabled" -> "new_materials_enabled"
-                else -> key
-            }
-            if (col != "userId" && col != "user_id" && col != "createdAt" && col != "created_at") {
-                put(col, value)
+            when (key) {
+                "displayName" -> {
+                    val clean = (value as? String)?.trim()?.take(80)
+                    if (!clean.isNullOrBlank()) put("display_name", clean)
+                }
+                "selectedClass" -> (value as? Number)?.toLong()?.coerceIn(6L, 12L)?.let {
+                    put("selected_class", it)
+                }
+                "avgScore" -> (value as? Number)?.toLong()?.coerceIn(0L, 100L)?.let {
+                    put("avg_score", it)
+                }
+                "dayStreak" -> (value as? Number)?.toLong()?.coerceIn(0L, 10_000L)?.let {
+                    put("day_streak", it)
+                }
+                "points" -> (value as? Number)?.toLong()?.coerceIn(0L, 10_000_000L)?.let {
+                    put("points", it)
+                }
+                "dailyGoalCount" -> (value as? Number)?.toLong()?.coerceIn(1L, 50L)?.let {
+                    put("daily_goal_count", it)
+                }
+                "dailyCompletedCount" -> (value as? Number)?.toLong()?.coerceIn(0L, 100L)?.let {
+                    put("daily_completed_count", it)
+                }
+                "darkThemeEnabled" -> (value as? Boolean)?.let { put("dark_theme_enabled", it) }
+                "notificationsEnabled" -> (value as? Boolean)?.let { put("notifications_enabled", it) }
+                "examRemindersEnabled" -> (value as? Boolean)?.let { put("exam_reminders_enabled", it) }
+                "newMaterialsEnabled" -> (value as? Boolean)?.let { put("new_materials_enabled", it) }
+                // Explicitly ignore role, subscriptionTier, subscription_tier, id, userId, user_id, email, and any unknown key
             }
         }
         put("updated_at", nowIso())

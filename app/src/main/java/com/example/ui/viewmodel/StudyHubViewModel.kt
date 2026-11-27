@@ -593,8 +593,11 @@ class StudyHubViewModel(
                 .onSuccess { quizId ->
                     if (question != null) {
                         repository.addQuizQuestion(question.copy(quizId = quizId))
+                            .onSuccess { _snackbarMessage.value = "Quiz & question saved" }
+                            .onFailure { _snackbarMessage.value = it.message ?: "Quiz saved, but failed to add question" }
+                    } else {
+                        _snackbarMessage.value = "Quiz saved"
                     }
-                    _snackbarMessage.value = "Quiz saved"
                 }
                 .onFailure { _snackbarMessage.value = it.message ?: "Failed to save quiz" }
         }
@@ -774,8 +777,14 @@ class StudyHubViewModel(
     }
 
     fun clearManualSupabaseConfig() {
-        _supabaseStatus.value = repository.clearManualSupabaseConfig()
-        _snackbarMessage.value = "Manual Supabase configuration cleared"
+        runCatching { repository.clearManualSupabaseConfig() }
+            .onSuccess { status ->
+                _supabaseStatus.value = status
+                _snackbarMessage.value = "Manual Supabase configuration cleared"
+            }
+            .onFailure { err ->
+                _snackbarMessage.value = err.message ?: "Unable to clear Supabase configuration"
+            }
     }
 
     fun cleanupBeforeSignOut() {

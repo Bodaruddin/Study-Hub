@@ -4,7 +4,6 @@ import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
-import org.json.JSONArray
 import org.json.JSONObject
 
 enum class OperationType(val value: String) {
@@ -26,31 +25,19 @@ fun handleCloudError(
         ?: causes.firstOrNull { it !is CancellationException }
         ?: exception
 
-    val currentUser = runCatching { Firebase.auth.currentUser }.getOrNull()
-
-    val providerInfoList = currentUser?.providerData?.map { provider ->
-        JSONObject().apply {
-            put("providerId", provider.providerId)
-            put("email", provider.email)
-        }
-    } ?: emptyList()
-
-    val authInfoJson = JSONObject().apply {
-        put("userId", currentUser?.uid)
-        put("email", currentUser?.email)
-        put("emailVerified", currentUser?.isEmailVerified)
-        put("tenantId", currentUser?.tenantId)
-        put("providerInfo", JSONArray(providerInfoList))
-    }
+    val isSignedIn = runCatching { Firebase.auth.currentUser != null }.getOrDefault(false)
+    val sanitizedResource = path?.substringBefore('?')?.take(80)
+    val statusCode = (rootError as? SupabaseApiException)?.statusCode
 
     val errorInfoJson = JSONObject().apply {
-        put("error", rootError.message ?: rootError.toString())
+        put("errorType", rootError::class.java.simpleName)
+        if (statusCode != null) put("statusCode", statusCode)
         put("operationType", operationType.value)
-        put("path", path)
-        put("authInfo", authInfoJson)
+        put("resource", sanitizedResource)
+        put("authenticated", isSignedIn)
     }
 
     val jsonString = errorInfoJson.toString()
-    Log.e("SupabaseError", "Supabase Error: $jsonString")
+    Log.e("SupabaseError", "Cloud operation failed: $jsonString")
     return jsonString
 }

@@ -140,16 +140,14 @@ object AuthManager {
                 } else {
                     onAuthError("Unexpected credential type returned.")
                 }
-            } catch (e: GetCredentialCancellationException) {
-                Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
+            } catch (_: GetCredentialCancellationException) {
+                Log.w(TAG, "Google Sign-In flow cancelled or dismissed")
                 onAuthCancelled()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Google Sign-In failed", e)
-                val projectTag = activeProjectId()?.let { " (Project: $it)" } ?: ""
-                val detail = e.localizedMessage?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
-                onAuthError("Google Sign-In failed$projectTag: $detail")
+                Log.e(TAG, "Google Sign-In failed: ${e::class.java.simpleName}")
+                onAuthError("Google Sign-In failed. Please check your connection and account settings and try again.")
             }
         }
     }
@@ -179,7 +177,7 @@ object AuthManager {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Email sign-in failed", e)
+                Log.w(TAG, "Email sign-in failed: ${e::class.java.simpleName}")
                 onAuthError(mapAuthException(e, "Email/Password"))
             }
         }
@@ -227,7 +225,7 @@ object AuthManager {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Email account creation failed", e)
+                Log.w(TAG, "Email account creation failed: ${e::class.java.simpleName}")
                 onAuthError(mapAuthException(e, "Email/Password"))
             }
         }
@@ -248,11 +246,11 @@ object AuthManager {
         scope.launch {
             try {
                 Firebase.auth.sendPasswordResetEmail(cleanEmail).await()
-                onSent("Password reset email sent to $cleanEmail.")
+                onSent("Password reset instructions sent. Please check your email inbox.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Password reset failed", e)
+                Log.w(TAG, "Password reset failed: ${e::class.java.simpleName}")
                 onError(mapAuthException(e, "Email/Password"))
             }
         }
@@ -263,14 +261,12 @@ object AuthManager {
             return "An account already exists with this email under a different login method. Sign in with your original provider."
         }
         if (error is FirebaseAuthException) {
-            val projectId = activeProjectId()
-            val projectTag = if (projectId != null) " (Project: $projectId)" else ""
             return when (error.errorCode) {
                 "ERROR_OPERATION_NOT_ALLOWED" -> {
                     if (providerLabel == "Email/Password") {
-                        "Email/Password is blocked on Firebase$projectTag. Enable Email/Password in Authentication → Sign-in method, and ensure 'Enable create (sign-up)' is checked under Authentication → Settings → User actions."
+                        "Email/Password sign-in is currently unavailable. Please try Google Sign-In or contact the administrator."
                     } else {
-                        "$providerLabel sign-in is not enabled in Firebase Console$projectTag (Authentication → Sign-in method)."
+                        "$providerLabel sign-in is currently unavailable. Please contact the administrator."
                     }
                 }
                 "ERROR_INVALID_EMAIL" ->
@@ -289,10 +285,10 @@ object AuthManager {
                     "Too many sign-in attempts right now. Please wait and try again."
                 "ERROR_WEB_CONTEXT_CANCELED", "ERROR_USER_CANCELLED" ->
                     "$providerLabel sign-in was cancelled."
-                else -> "${error.errorCode}$projectTag: ${error.localizedMessage ?: "$providerLabel sign-in failed."}"
+                else -> "$providerLabel sign-in failed. Please try again."
             }
         }
-        return error.localizedMessage ?: "$providerLabel sign-in failed. Please try again."
+        return "$providerLabel sign-in failed. Please try again."
     }
 
     fun signOut(
@@ -306,12 +302,12 @@ object AuthManager {
                 try {
                     onBeforeFirebaseSignOut()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Pre-signout cleanup error: ${e.message}")
+                    Log.w(TAG, "Pre-signout cleanup error: ${e::class.java.simpleName}")
                 }
                 try {
                     credentialManager.clearCredentialState(ClearCredentialStateRequest())
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to clear credential state: ${e.message}")
+                    Log.w(TAG, "Failed to clear credential state: ${e::class.java.simpleName}")
                 } finally {
                     Firebase.auth.signOut()
                     onSignOutComplete()
