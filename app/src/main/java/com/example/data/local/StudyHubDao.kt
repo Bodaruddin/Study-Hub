@@ -213,4 +213,46 @@ interface StudyHubDao {
         clearCachedExamPapers()
         clearCachedPaperAttachments()
     }
+
+    @Transaction
+    suspend fun replaceClasses(items: List<CachedClassEntity>) {
+        clearCachedClasses()
+        if (items.isNotEmpty()) upsertClasses(items)
+    }
+
+    @Transaction
+    suspend fun replaceSubjects(items: List<CachedSubjectEntity>) {
+        clearCachedSubjects()
+        if (items.isNotEmpty()) upsertSubjects(items)
+    }
+
+    @Transaction
+    suspend fun replaceChapters(items: List<CachedChapterEntity>) {
+        clearCachedChapters()
+        if (items.isNotEmpty()) upsertChapters(items)
+    }
+
+    @Transaction
+    suspend fun replaceMaterials(items: List<CachedMaterialEntity>) {
+        clearCachedMaterials()
+        if (items.isNotEmpty()) upsertMaterials(items)
+    }
+
+    @Transaction
+    suspend fun replaceQuizzes(items: List<CachedQuizEntity>) {
+        clearCachedQuizzes()
+        if (items.isNotEmpty()) upsertQuizzes(items)
+    }
+
+    @Transaction
+    suspend fun replaceQuestions(items: List<CachedQuestionEntity>) {
+        clearCachedQuestions()
+        if (items.isNotEmpty()) upsertQuestions(items)
+    }
+
+    @Transaction
+    suspend fun replaceExamPapers(items: List<CachedExamPaperEntity>) {
+        clearCachedExamPapers()
+        if (items.isNotEmpty()) upsertExamPapers(items)
+    }
 }

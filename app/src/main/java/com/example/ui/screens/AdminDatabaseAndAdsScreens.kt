@@ -64,6 +64,7 @@ import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.data.model.SyncStatus
 import com.example.data.model.UserProfile
+import com.example.data.remote.SupabaseConnectionStatus
 import com.example.ui.components.EthicalAdFreeUpgradeBanner
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.BlueEnd
@@ -96,6 +97,8 @@ fun LazyListScope.adminManageDatabaseItems(
     syncStatus: SyncStatus,
     pendingSyncCount: Int,
     isDatabaseBusy: Boolean,
+    supabaseStatus: SupabaseConnectionStatus,
+    onOpenSupabaseSetup: () -> Unit,
     onSyncCloudNow: () -> Unit,
     onSeedMissingCloud: () -> Unit,
     onFlushSyncQueue: () -> Unit,
@@ -110,7 +113,7 @@ fun LazyListScope.adminManageDatabaseItems(
                 title = { Text("Reset Local Room Cache?") },
                 text = {
                     Text(
-                        "This clears local cached curriculum tables and immediately re-syncs fresh records from Cloud Firestore."
+                        "This clears local cached curriculum tables and immediately re-syncs fresh records from Supabase."
                     )
                 },
                 confirmButton = {
@@ -170,7 +173,11 @@ fun LazyListScope.adminManageDatabaseItems(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Firestore Cloud + Room SQLite Cache",
+                                    text = if (supabaseStatus.configured) {
+                                        "Supabase (${supabaseStatus.hostLabel ?: "Connected"}) • ${supabaseStatus.sourceLabel}"
+                                    } else {
+                                        "Supabase Not Configured • Room Cache Active"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFFDCE4FF)
                                 )
@@ -178,13 +185,21 @@ fun LazyListScope.adminManageDatabaseItems(
                         }
                         Surface(
                             shape = RoundedCornerShape(50),
-                            color = if (syncStatus == SyncStatus.OFFLINE) OrangeStart.copy(alpha = 0.25f) else SuccessGreen.copy(alpha = 0.24f)
+                            color = if (!supabaseStatus.configured || syncStatus == SyncStatus.OFFLINE) {
+                                OrangeStart.copy(alpha = 0.25f)
+                            } else {
+                                SuccessGreen.copy(alpha = 0.24f)
+                            }
                         ) {
                             Text(
-                                text = syncStatus.label.uppercase(),
+                                text = if (!supabaseStatus.configured) "SETUP" else syncStatus.label.uppercase(),
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (syncStatus == SyncStatus.OFFLINE) Color(0xFFFFD8A8) else Color(0xFF9BF6C6),
+                                color = if (!supabaseStatus.configured || syncStatus == SyncStatus.OFFLINE) {
+                                    Color(0xFFFFD8A8)
+                                } else {
+                                    Color(0xFF9BF6C6)
+                                },
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -248,8 +263,23 @@ fun LazyListScope.adminManageDatabaseItems(
                     }
 
                     DatabaseActionTile(
+                        title = "Setup / Configure Supabase",
+                        subtitle = if (supabaseStatus.configured) {
+                            "Update URL & Anon Key, test connection, or copy SQL schema"
+                        } else {
+                            "Enter Supabase URL & Anon Key manually + copy SQL schema"
+                        },
+                        icon = Icons.Rounded.Storage,
+                        colors = listOf(PurpleStart, PurpleEnd),
+                        depthColor = Color(0xFF33088C),
+                        enabled = !isDatabaseBusy,
+                        tag = "db_setup_supabase_btn",
+                        onClick = onOpenSupabaseSetup
+                    )
+
+                    DatabaseActionTile(
                         title = "Sync Cloud → Device Cache",
-                        subtitle = "Pull latest Firestore classes, materials, quizzes & users",
+                        subtitle = "Pull latest Supabase classes, materials, quizzes & users",
                         icon = Icons.Rounded.CloudSync,
                         colors = listOf(BlueStart, BlueEnd),
                         depthColor = Color(0xFF092E8A),
@@ -260,7 +290,7 @@ fun LazyListScope.adminManageDatabaseItems(
 
                     DatabaseActionTile(
                         title = "Seed / Repair Default Curriculum",
-                        subtitle = "Insert any missing default classes, chapters, quizzes & settings to Cloud",
+                        subtitle = "Insert any missing default classes, chapters, quizzes & settings to Supabase",
                         icon = Icons.Rounded.Backup,
                         colors = listOf(GreenStart, GreenEnd),
                         depthColor = Color(0xFF045E34),
@@ -271,7 +301,7 @@ fun LazyListScope.adminManageDatabaseItems(
 
                     DatabaseActionTile(
                         title = "Flush Offline Sync Queue ($pendingSyncCount)",
-                        subtitle = "Push queued student/admin updates to Cloud Firestore",
+                        subtitle = "Push queued student/admin updates to Supabase",
                         icon = Icons.Rounded.Sync,
                         colors = listOf(TealStart, TealEnd),
                         depthColor = Color(0xFF065466),
@@ -282,7 +312,7 @@ fun LazyListScope.adminManageDatabaseItems(
 
                     DatabaseActionTile(
                         title = "Reset Local Cache & Re-sync",
-                        subtitle = "Clear Room SQLite cache tables and rebuild from Cloud Firestore",
+                        subtitle = "Clear Room SQLite cache tables and rebuild from Supabase",
                         icon = Icons.Rounded.DeleteSweep,
                         colors = listOf(OrangeStart, OrangeEnd),
                         depthColor = Color(0xFF9E3C00),
@@ -295,7 +325,7 @@ fun LazyListScope.adminManageDatabaseItems(
 
             // Collection Inventory
             Text(
-                text = "Firestore & Room Collections",
+                text = "Supabase Tables & Room Cache",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White,
                 fontWeight = FontWeight.Bold

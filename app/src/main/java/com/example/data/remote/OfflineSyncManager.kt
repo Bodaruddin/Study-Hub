@@ -7,10 +7,8 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import com.example.data.local.PendingSyncEntity
 import com.example.data.local.StudyHubDao
+import com.example.data.model.SupabaseMappers
 import com.example.data.model.SyncStatus
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,13 +17,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
 class OfflineSyncManager(
     context: Context,
     private val dao: StudyHubDao,
-    private val db: FirebaseFirestore
+    private val supabase: SupabaseRestClient
 ) {
     private val appContext = context.applicationContext
     private val connectivityManager =
@@ -91,6 +88,10 @@ class OfflineSyncManager(
             _syncStatus.value = SyncStatus.OFFLINE
             return Result.success(0)
         }
+        if (!supabase.isConfigured()) {
+            _syncStatus.value = SyncStatus.ONLINE
+            return Result.success(0)
+        }
         val pending = dao.getPendingSyncOnce(userId)
         if (pending.isEmpty()) {
             _syncStatus.value = SyncStatus.SYNCED
@@ -110,7 +111,7 @@ class OfflineSyncManager(
                 throw e
             } catch (e: Exception) {
                 hadFailure = true
-                handleFirestoreError(e, OperationType.WRITE, "sync/${item.actionType}/${item.targetId}")
+                handleCloudError(e, OperationType.WRITE, "sync/${item.actionType}/${item.targetId}")
                 dao.markSyncFailed(item.syncKey, e.message ?: "Sync failed")
             }
         }
@@ -125,108 +126,87 @@ class OfflineSyncManager(
 
     private suspend fun executeSyncAction(userId: String, item: PendingSyncEntity) {
         val json = JSONObject(item.payloadJson)
-        val userRef = db.collection("users").document(userId)
+        val rowId = "${userId}__${item.targetId}"
+        val nowIso = SupabaseMappers.nowIso()
 
         when (item.actionType) {
             ACTION_UPSERT_BOOKMARK -> {
-                val docRef = userRef.collection("bookmarks").document(item.targetId)
-                val exists = docRef.get().await().exists()
-                val updatePayload = mapOf(
-                    "materialId" to json.getString("materialId"),
-                    "title" to json.getString("title"),
-                    "subjectName" to json.getString("subjectName"),
-                    "classGrade" to json.getLong("classGrade"),
-                    "materialType" to json.getString("materialType"),
-                    "subtitle" to json.getString("subtitle"),
-                    "accentKey" to json.getString("accentKey"),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                if (exists) {
-                    docRef.update(updatePayload).await()
-                } else {
-                    docRef.set(updatePayload + ("createdAt" to FieldValue.serverTimestamp())).await()
+                val payload = JSONObject().apply {
+                    put("id", rowId)
+                    put("user_id", userId)
+                    put("material_id", json.getString("materialId"))
+                    put("title", json.getString("title"))
+                    put("subject_name", json.getString("subjectName"))
+                    put("class_grade", json.getLong("classGrade"))
+                    put("material_type", json.getString("materialType"))
+                    put("subtitle", json.getString("subtitle"))
+                    put("accent_key", json.getString("accentKey"))
+                    put("updated_at", nowIso)
                 }
+                supabase.upsertOne("bookmarks", payload)
             }
 
             ACTION_DELETE_BOOKMARK -> {
-                userRef.collection("bookmarks").document(item.targetId).delete().await()
+                supabase.deleteWhere(
+                    "bookmarks",
+                    mapOf("id" to "eq.$rowId", "user_id" to "eq.$userId")
+                )
             }
 
             ACTION_ADD_QUIZ_ATTEMPT -> {
-                val docRef = userRef.collection("quiz_attempts").document(item.targetId)
-                val payload = mapOf(
-                    "quizId" to json.getString("quizId"),
-                    "quizTitle" to json.getString("quizTitle"),
-                    "subjectName" to json.getString("subjectName"),
-                    "classGrade" to json.getLong("classGrade"),
-                    "mode" to json.getString("mode"),
-                    "totalQuestions" to json.getLong("totalQuestions"),
-                    "correctAnswers" to json.getLong("correctAnswers"),
-                    "scorePercent" to json.getLong("scorePercent"),
-                    "durationSeconds" to json.getLong("durationSeconds"),
-                    "pointsEarned" to json.getLong("pointsEarned"),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                docRef.set(payload).await()
+                val payload = JSONObject().apply {
+                    put("id", rowId)
+                    put("user_id", userId)
+                    put("quiz_id", json.getString("quizId"))
+                    put("quiz_title", json.getString("quizTitle"))
+                    put("subject_name", json.getString("subjectName"))
+                    put("class_grade", json.getLong("classGrade"))
+                    put("mode", json.getString("mode"))
+                    put("total_questions", json.getLong("totalQuestions"))
+                    put("correct_answers", json.getLong("correctAnswers"))
+                    put("score_percent", json.getLong("scorePercent"))
+                    put("duration_seconds", json.getLong("durationSeconds"))
+                    put("points_earned", json.getLong("pointsEarned"))
+                    put("created_at", nowIso)
+                    put("updated_at", nowIso)
+                }
+                supabase.upsertOne("quiz_attempts", payload)
             }
 
             ACTION_UPSERT_PROGRESS -> {
-                val docRef = userRef.collection("reading_progress").document(item.targetId)
-                val exists = docRef.get().await().exists()
-                if (exists) {
-                    val updatePayload = mapOf(
-                        "title" to json.getString("title"),
-                        "subjectName" to json.getString("subjectName"),
-                        "chapterTitle" to json.getString("chapterTitle"),
-                        "classGrade" to json.getLong("classGrade"),
-                        "progressPercent" to json.getLong("progressPercent"),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    docRef.update(updatePayload).await()
-                } else {
-                    val createPayload = mapOf(
-                        "materialId" to json.getString("materialId"),
-                        "title" to json.getString("title"),
-                        "subjectName" to json.getString("subjectName"),
-                        "chapterTitle" to json.getString("chapterTitle"),
-                        "classGrade" to json.getLong("classGrade"),
-                        "progressPercent" to json.getLong("progressPercent"),
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    docRef.set(createPayload).await()
+                val payload = JSONObject().apply {
+                    put("id", rowId)
+                    put("user_id", userId)
+                    put("material_id", json.getString("materialId"))
+                    put("title", json.getString("title"))
+                    put("subject_name", json.getString("subjectName"))
+                    put("chapter_title", json.getString("chapterTitle"))
+                    put("class_grade", json.getLong("classGrade"))
+                    put("progress_percent", json.getLong("progressPercent"))
+                    put("updated_at", nowIso)
                 }
+                supabase.upsertOne("reading_progress", payload)
             }
 
             ACTION_ADD_DOWNLOAD -> {
-                val docRef = userRef.collection("downloads").document(item.targetId)
-                val exists = docRef.get().await().exists()
-                if (exists) {
-                    val updatePayload = mapOf(
-                        "title" to json.getString("title"),
-                        "subjectName" to json.getString("subjectName"),
-                        "classGrade" to json.getLong("classGrade"),
-                        "fileSizeLabel" to json.getString("fileSizeLabel"),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    docRef.update(updatePayload).await()
-                } else {
-                    val createPayload = mapOf(
-                        "materialId" to json.getString("materialId"),
-                        "title" to json.getString("title"),
-                        "subjectName" to json.getString("subjectName"),
-                        "classGrade" to json.getLong("classGrade"),
-                        "fileSizeLabel" to json.getString("fileSizeLabel"),
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    docRef.set(createPayload).await()
+                val payload = JSONObject().apply {
+                    put("id", rowId)
+                    put("user_id", userId)
+                    put("material_id", json.getString("materialId"))
+                    put("title", json.getString("title"))
+                    put("subject_name", json.getString("subjectName"))
+                    put("class_grade", json.getLong("classGrade"))
+                    put("file_size_label", json.getString("fileSizeLabel"))
+                    put("updated_at", nowIso)
                 }
+                supabase.upsertOne("downloads", payload)
             }
 
             ACTION_DELETE_DOWNLOAD -> {
-                userRef.collection("downloads").document(item.targetId).delete().await()
+                supabase.deleteWhere(
+                    "downloads",
+                    mapOf("id" to "eq.$rowId", "user_id" to "eq.$userId")
+                )
             }
         }
     }

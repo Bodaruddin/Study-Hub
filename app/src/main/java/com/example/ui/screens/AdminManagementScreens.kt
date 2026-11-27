@@ -84,6 +84,7 @@ import com.example.data.model.SubjectItem
 import com.example.data.model.SyncStatus
 import com.example.data.model.UserProfile
 import com.example.data.remote.AttachmentMediaHelper
+import com.example.data.remote.SupabaseConnectionStatus
 import com.example.ui.components.AdminAttachmentDraftStrip
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.DangerRed
@@ -116,6 +117,7 @@ fun AdminSubmoduleScaffold(
     syncStatus: SyncStatus,
     pendingSyncCount: Int,
     isDatabaseBusy: Boolean,
+    supabaseStatus: SupabaseConnectionStatus,
     onBackToDashboard: () -> Unit,
     onOpenDrawer: () -> Unit,
     onNavigateModule: (AdminModule) -> Unit,
@@ -139,6 +141,7 @@ fun AdminSubmoduleScaffold(
     onSeedMissingCloud: () -> Unit,
     onFlushSyncQueue: () -> Unit,
     onResetLocalCache: () -> Unit,
+    onOpenSupabaseSetup: () -> Unit,
     onSwitchToStudent: () -> Unit
 ) {
     BackHandler { onBackToDashboard() }
@@ -288,6 +291,7 @@ fun AdminSubmoduleScaffold(
                             title = c.name,
                             subtitle = "${c.studentCount} students • ${c.description}",
                             badge = if (c.published) "Published" else "Draft",
+                            deleteTag = "delete_class_${c.id}",
                             onDelete = { onDeleteClass(c.id) }
                         )
                     }
@@ -612,6 +616,8 @@ fun AdminSubmoduleScaffold(
                     syncStatus = syncStatus,
                     pendingSyncCount = pendingSyncCount,
                     isDatabaseBusy = isDatabaseBusy,
+                    supabaseStatus = supabaseStatus,
+                    onOpenSupabaseSetup = onOpenSupabaseSetup,
                     onSyncCloudNow = onSyncCloudNow,
                     onSeedMissingCloud = onSeedMissingCloud,
                     onFlushSyncQueue = onFlushSyncQueue,
@@ -802,6 +808,7 @@ private fun AdminDarkRowCard(
     title: String,
     subtitle: String,
     badge: String,
+    deleteTag: String = "admin_row_delete",
     onDelete: (() -> Unit)? = null
 ) {
     Tactile3DCard(
@@ -850,8 +857,11 @@ private fun AdminDarkRowCard(
                 )
             }
             if (onDelete != null) {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Rounded.Delete, contentDescription = "Delete", tint = DangerRed)
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.testTag(deleteTag)
+                ) {
+                    Icon(Icons.Rounded.Delete, contentDescription = "Delete $title", tint = DangerRed)
                 }
             }
         }

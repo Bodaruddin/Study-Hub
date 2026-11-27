@@ -101,6 +101,8 @@ import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.data.model.UserProfile
+import com.example.data.remote.SupabaseConnectionStatus
+import com.example.data.remote.SupabaseTestResult
 import com.example.ui.components.PlatformAnalyticsLineChart
 import com.example.ui.components.StudyHubBrandLogo
 import com.example.ui.components.Tactile3DCard
@@ -180,6 +182,7 @@ fun AdminShellScreen(
     syncStatus: SyncStatus,
     pendingSyncCount: Int,
     isDatabaseBusy: Boolean,
+    supabaseStatus: SupabaseConnectionStatus,
     onSaveClass: (SchoolClass, Boolean) -> Unit,
     onDeleteClass: (String) -> Unit,
     onSaveSubject: (SubjectItem, Boolean) -> Unit,
@@ -199,6 +202,10 @@ fun AdminShellScreen(
     onSeedMissingCloud: () -> Unit,
     onFlushSyncQueue: () -> Unit,
     onResetLocalCache: () -> Unit,
+    onTestSupabaseConnection: suspend (String, String) -> SupabaseTestResult,
+    onSaveSupabaseConfig: suspend (String, String) -> Result<SupabaseTestResult>,
+    onClearSupabaseConfig: () -> Unit,
+    onShowMessage: (String) -> Unit,
     onSwitchToStudentView: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -211,6 +218,7 @@ fun AdminShellScreen(
     var showAddMcqDialog by remember { mutableStateOf(false) }
     var showCreateQuizDialog by remember { mutableStateOf(false) }
     var showAnnouncementDialog by remember { mutableStateOf(false) }
+    var showSupabaseSetupDialog by remember { mutableStateOf(false) }
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -283,6 +291,16 @@ fun AdminShellScreen(
                 onSendAnnouncement(title, msg, grade, prio)
                 showAnnouncementDialog = false
             }
+        )
+    }
+    if (showSupabaseSetupDialog) {
+        AdminSupabaseSetupDialog(
+            status = supabaseStatus,
+            onDismiss = { showSupabaseSetupDialog = false },
+            onTestConnection = onTestSupabaseConnection,
+            onSaveConfig = onSaveSupabaseConfig,
+            onClearConfig = onClearSupabaseConfig,
+            onShowMessage = onShowMessage
         )
     }
 
@@ -387,6 +405,8 @@ fun AdminShellScreen(
                         materials = materials,
                         quizzes = quizzes,
                         announcements = announcements,
+                        supabaseStatus = supabaseStatus,
+                        onOpenSupabaseSetup = { showSupabaseSetupDialog = true },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenAnnouncements = { activeModule = AdminModule.ANNOUNCEMENTS },
                         onAddClass = { showAddClassDialog = true },
@@ -415,6 +435,7 @@ fun AdminShellScreen(
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
                         isDatabaseBusy = isDatabaseBusy,
+                        supabaseStatus = supabaseStatus,
                         onBackToDashboard = {
                             activeModule = AdminModule.DASHBOARD
                             activeBottomTab = 0
@@ -444,6 +465,7 @@ fun AdminShellScreen(
                         onSeedMissingCloud = onSeedMissingCloud,
                         onFlushSyncQueue = onFlushSyncQueue,
                         onResetLocalCache = onResetLocalCache,
+                        onOpenSupabaseSetup = { showSupabaseSetupDialog = true },
                         onSwitchToStudent = onSwitchToStudentView
                     )
                 }
@@ -459,6 +481,8 @@ private fun AdminDashboardContent(
     materials: List<StudyMaterial>,
     quizzes: List<QuizItem>,
     announcements: List<AnnouncementItem>,
+    supabaseStatus: SupabaseConnectionStatus,
+    onOpenSupabaseSetup: () -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenAnnouncements: () -> Unit,
     onAddClass: () -> Unit,
@@ -681,6 +705,75 @@ private fun AdminDashboardContent(
                             ),
                         contentScale = ContentScale.Crop
                     )
+                }
+            }
+        }
+
+        // Supabase Database Setup Banner on Admin Dashboard
+        item {
+            Tactile3DCard(
+                faceBrush = Brush.linearGradient(
+                    if (supabaseStatus.configured) {
+                        listOf(Color(0xFF0F3D3E), Color(0xFF134E4A))
+                    } else {
+                        listOf(Color(0xFF7C2D12), Color(0xFF9A3412))
+                    }
+                ),
+                depthColor = Color(0xFF071A1C),
+                shadowColor = if (supabaseStatus.configured) TealEnd else OrangeEnd,
+                cornerRadius = 18.dp,
+                depthHeight = 4.dp,
+                floatingLift = 4.dp,
+                glassGlossAlpha = 0.85f,
+                onClick = onOpenSupabaseSetup,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("dashboard_supabase_setup_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(Color.White.copy(alpha = 0.18f))
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Storage,
+                            contentDescription = "Setup Supabase Database",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (supabaseStatus.configured) {
+                                "Supabase Connected (${supabaseStatus.hostLabel ?: "Ready"})"
+                            } else {
+                                "Setup Supabase Database"
+                            },
+                            fontFamily = OutfitFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (supabaseStatus.configured) {
+                                "${supabaseStatus.sourceLabel} • Tap to edit credentials or copy SQL"
+                            } else {
+                                "Tap to enter Project URL, Anon Key & copy SQL schema"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFE2E8F0)
+                        )
+                    }
                 }
             }
         }

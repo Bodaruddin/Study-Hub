@@ -64,6 +64,7 @@ import com.example.data.model.SubjectItem
 import com.example.data.remote.AuthManager
 import com.example.data.remote.OfflineSyncManager
 import com.example.data.remote.StudyHubRepository
+import com.example.data.remote.SupabaseRestClient
 import com.example.ui.components.StudyHubBrandLogo
 import com.example.ui.screens.AdminShellScreen
 import com.example.ui.screens.AuthScreen
@@ -84,7 +85,6 @@ import com.example.ui.viewmodel.QuizMode
 import com.example.ui.viewmodel.StudyHubViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,13 +110,11 @@ private fun StudyHubApp() {
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
-    val firestoreDb = remember {
-        FirebaseFirestore.getInstance(appContext.getString(R.string.firestore_database_id))
-    }
+    val supabaseClient = remember { SupabaseRestClient(appContext) }
     val roomDb = remember { StudyHubDatabase.getInstance(appContext) }
     val dao = remember { roomDb.studyHubDao() }
-    val syncManager = remember { OfflineSyncManager(appContext, dao, firestoreDb) }
-    val repository = remember { StudyHubRepository(firestoreDb, dao, syncManager, appContext) }
+    val syncManager = remember { OfflineSyncManager(appContext, dao, supabaseClient) }
+    val repository = remember { StudyHubRepository(supabaseClient, dao, syncManager, appContext) }
 
     val authUser by AuthManager.authStateFlow().collectAsStateWithLifecycle(
         initialValue = Firebase.auth.currentUser
@@ -205,6 +203,7 @@ private fun StudyHubApp() {
         val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
         val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
         val isDatabaseBusy by viewModel.isDatabaseBusy.collectAsStateWithLifecycle()
+        val supabaseStatus by viewModel.supabaseStatus.collectAsStateWithLifecycle()
 
         val snackbarHostState = remember { SnackbarHostState() }
         LaunchedEffect(snackbarMessage) {
@@ -235,6 +234,7 @@ private fun StudyHubApp() {
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
                         isDatabaseBusy = isDatabaseBusy,
+                        supabaseStatus = supabaseStatus,
                         onSaveClass = viewModel::saveSchoolClass,
                         onDeleteClass = viewModel::deleteSchoolClass,
                         onSaveSubject = viewModel::saveSubject,
@@ -254,6 +254,10 @@ private fun StudyHubApp() {
                         onSeedMissingCloud = viewModel::seedMissingCloudData,
                         onFlushSyncQueue = viewModel::flushPendingSyncQueue,
                         onResetLocalCache = viewModel::resetLocalCacheAndResync,
+                        onTestSupabaseConnection = viewModel::testSupabaseConnection,
+                        onSaveSupabaseConfig = viewModel::saveManualSupabaseConfig,
+                        onClearSupabaseConfig = viewModel::clearManualSupabaseConfig,
+                        onShowMessage = viewModel::showMessage,
                         onSwitchToStudentView = { viewModel.setAdminMode(false) }
                     )
                 } else {

@@ -3,7 +3,6 @@ package com.example.data.remote
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,13 +16,13 @@ enum class OperationType(val value: String) {
     WRITE("write")
 }
 
-fun handleFirestoreError(
+fun handleCloudError(
     exception: Throwable,
     operationType: OperationType,
     path: String?
 ): String {
     val causes = generateSequence(exception) { it.cause }
-    val rootError = causes.firstOrNull { it is FirebaseFirestoreException }
+    val rootError = causes.firstOrNull { it is SupabaseApiException }
         ?: causes.firstOrNull { it !is CancellationException }
         ?: exception
 
@@ -52,6 +51,6 @@ fun handleFirestoreError(
     }
 
     val jsonString = errorInfoJson.toString()
-    Log.e("FirestoreError", "Firestore Error: $jsonString")
+    Log.e("SupabaseError", "Supabase Error: $jsonString")
     return jsonString
 }

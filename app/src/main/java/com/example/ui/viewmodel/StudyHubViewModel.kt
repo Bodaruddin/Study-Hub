@@ -23,7 +23,8 @@ import com.example.data.model.UserProfile
 import com.example.data.remote.OfflineSyncManager
 import com.example.data.remote.SeedCurriculumData
 import com.example.data.remote.StudyHubRepository
-import com.google.firebase.firestore.FirebaseFirestoreException
+import com.example.data.remote.SupabaseConnectionStatus
+import com.example.data.remote.SupabaseTestResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -98,6 +99,9 @@ class StudyHubViewModel(
     private val _isDatabaseBusy = MutableStateFlow(false)
     val isDatabaseBusy: StateFlow<Boolean> = _isDatabaseBusy.asStateFlow()
 
+    private val _supabaseStatus = MutableStateFlow(repository.getSupabaseConnectionStatus())
+    val supabaseStatus: StateFlow<SupabaseConnectionStatus> = _supabaseStatus.asStateFlow()
+
     private var timerJob: Job? = null
 
     val isOnline: StateFlow<Boolean> = syncManager.isOnline
@@ -149,16 +153,14 @@ class StudyHubViewModel(
         isAdmin = repository.isVerifiedAdminEmail(currentUserEmail)
     )
         .catch { error ->
-            val fsErr = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
-            if (fsErr == null && error is CancellationException) throw error
+            if (error is CancellationException) throw error
             emit(SeedCurriculumData.defaultAnnouncements)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), SeedCurriculumData.defaultAnnouncements)
 
     val appSettings: StateFlow<AppSettings> = repository.observeCloudAppSettings()
         .catch { error ->
-            val fsErr = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
-            if (fsErr == null && error is CancellationException) throw error
+            if (error is CancellationException) throw error
             emit(SeedCurriculumData.defaultAppSettings)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), SeedCurriculumData.defaultAppSettings)
@@ -185,8 +187,7 @@ class StudyHubViewModel(
         viewModelScope.launch {
             repository.observeUserProfile(currentUserId)
                 .catch { error ->
-                    val fsErr = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
-                    if (fsErr == null && error is CancellationException) throw error
+                    if (error is CancellationException) throw error
                 }
                 .collect { remoteProfile ->
                     if (remoteProfile != null) {
@@ -717,6 +718,33 @@ class StudyHubViewModel(
                 _isDatabaseBusy.value = false
             }
         }
+    }
+
+    suspend fun testSupabaseConnection(url: String, anonKey: String): SupabaseTestResult =
+        repository.testSupabaseConnection(url, anonKey)
+
+    suspend fun saveManualSupabaseConfig(url: String, anonKey: String): Result<SupabaseTestResult> {
+        val result = repository.saveManualSupabaseConfig(url, anonKey)
+        _supabaseStatus.value = repository.getSupabaseConnectionStatus()
+        result.onSuccess { test ->
+            if (test.connected && test.schemaReady) {
+                repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                syncManager.flushPendingSync(currentUserId)
+                repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+                loadAdminUsers()
+                _snackbarMessage.value = "Supabase connected and synced!"
+            } else {
+                _snackbarMessage.value = "Supabase credentials saved"
+            }
+        }.onFailure { err ->
+            _snackbarMessage.value = err.message ?: "Failed to save Supabase configuration"
+        }
+        return result
+    }
+
+    fun clearManualSupabaseConfig() {
+        _supabaseStatus.value = repository.clearManualSupabaseConfig()
+        _snackbarMessage.value = "Manual Supabase configuration cleared"
     }
 
     fun cleanupBeforeSignOut() {

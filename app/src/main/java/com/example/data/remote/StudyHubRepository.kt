@@ -1,14 +1,12 @@
 package com.example.data.remote
 
 import android.content.Context
-import android.util.Log
 import com.example.data.local.CachedBookmarkEntity
 import com.example.data.local.CachedChapterEntity
 import com.example.data.local.CachedClassEntity
 import com.example.data.local.CachedDownloadEntity
 import com.example.data.local.CachedExamPaperEntity
 import com.example.data.local.CachedMaterialEntity
-import com.example.data.local.CachedPaperAttachmentEntity
 import com.example.data.local.CachedQuestionEntity
 import com.example.data.local.CachedQuizAttemptEntity
 import com.example.data.local.CachedQuizEntity
@@ -22,7 +20,7 @@ import com.example.data.model.BookmarkRecord
 import com.example.data.model.ChapterItem
 import com.example.data.model.DownloadRecord
 import com.example.data.model.ExamPaper
-import com.example.data.model.PaperAttachmentChunk
+import com.example.data.model.MaterialType
 import com.example.data.model.PaperAttachmentDraft
 import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizItem
@@ -32,36 +30,66 @@ import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
+import com.example.data.model.SupabaseMappers
+import com.example.data.model.SupabaseMappers.toSupabaseJson
 import com.example.data.model.UserProfile
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.snapshots
-import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
 class StudyHubRepository(
-    private val db: FirebaseFirestore,
+    private val supabase: SupabaseRestClient,
     private val dao: StudyHubDao,
     private val syncManager: OfflineSyncManager,
     private val appContext: Context
 ) {
     private val auth = Firebase.auth
+    private val syncHelper = SupabaseSeedAndSyncHelper(supabase, dao, appContext)
+    private val profileRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    private val cloudRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+
+    fun isSupabaseConfigured(): Boolean = supabase.isConfigured()
+
+    fun getSupabaseConnectionStatus(): SupabaseConnectionStatus = supabase.connectionStatus()
+
+    suspend fun testSupabaseConnection(url: String, anonKey: String): SupabaseTestResult {
+        requireUserId()
+        return supabase.testConnection(urlOverride = url, anonKeyOverride = anonKey)
+    }
+
+    suspend fun saveManualSupabaseConfig(url: String, anonKey: String): Result<SupabaseTestResult> {
+        return try {
+            requireUserId()
+            supabase.saveManualConfig(url, anonKey)
+            val test = supabase.testConnection()
+            if (test.connected && test.schemaReady) {
+                syncHelper.seedCurriculumToCloudIfEmpty()
+                syncHelper.syncCurriculumFromCloud(isAdmin = true)
+                cloudRefreshTrigger.tryEmit(Unit)
+                profileRefreshTrigger.tryEmit(Unit)
+            }
+            Result.success(test)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun clearManualSupabaseConfig(): SupabaseConnectionStatus {
+        supabase.clearManualConfig()
+        return supabase.connectionStatus()
+    }
 
     private fun requireUserId(): String =
         auth.currentUser?.uid
-            ?: throw IllegalStateException("User must be signed in with Google before accessing StudyHub cloud data.")
+            ?: throw IllegalStateException("User must be signed in before accessing StudyHub data.")
 
     fun isVerifiedAdminEmail(email: String?): Boolean =
         email != null &&
@@ -69,16 +97,7 @@ class StudyHubRepository(
             (auth.currentUser?.isEmailVerified == true)
 
     suspend fun ensureLocalSeedData() {
-        val existingClasses = dao.observeClasses().first()
-        if (existingClasses.isEmpty()) {
-            dao.upsertClasses(SeedCurriculumData.classes)
-            dao.upsertSubjects(SeedCurriculumData.subjects)
-            dao.upsertChapters(SeedCurriculumData.chapters)
-            dao.upsertMaterials(SeedCurriculumData.materials)
-            dao.upsertQuizzes(SeedCurriculumData.quizzes)
-            dao.upsertQuestions(SeedCurriculumData.questions)
-            dao.upsertExamPapers(SeedCurriculumData.examPapers)
-        }
+        syncHelper.ensureLocalSeedData(force = false)
     }
 
     suspend fun ensureUserProfile(
@@ -86,54 +105,60 @@ class StudyHubRepository(
         displayName: String,
         email: String
     ): Result<UserProfile> {
-        val path = "users/$uid"
+        val path = "user_profiles/$uid"
         return try {
             val activeUid = requireUserId()
             check(activeUid == uid) { "Authenticated UID mismatch." }
-            val docRef = db.collection("users").document(uid)
-            val snap = docRef.get().await()
-            if (snap.exists()) {
-                val existing = snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    ?: UserProfile(id = uid, userId = uid, displayName = displayName, email = email)
+
+            val fallbackRole = if (isVerifiedAdminEmail(email)) "admin" else "student"
+            val defaultProfile = UserProfile(
+                id = uid,
+                userId = uid,
+                displayName = displayName.ifBlank { "StudyHub Student" },
+                email = email,
+                selectedClass = 7L,
+                role = fallbackRole,
+                subscriptionTier = "free",
+                avgScore = 87L,
+                dayStreak = 15L,
+                points = 120L,
+                dailyGoalCount = 5L,
+                dailyCompletedCount = 3L,
+                darkThemeEnabled = fallbackRole == "admin",
+                notificationsEnabled = true,
+                examRemindersEnabled = true,
+                newMaterialsEnabled = true
+            )
+
+            if (!supabase.isConfigured()) {
+                return Result.success(defaultProfile)
+            }
+
+            val rows = supabase.select("user_profiles", mapOf("id" to "eq.$uid"), limit = 1)
+            if (rows.length() > 0) {
+                val existing = SupabaseMappers.userProfileFromJson(rows.getJSONObject(0))
                 val promoted = if (isVerifiedAdminEmail(email) && existing.role != "admin") {
-                    docRef.update(
-                        mapOf(
-                            "role" to "admin",
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
+                    supabase.updateWhere(
+                        table = "user_profiles",
+                        filters = mapOf("id" to "eq.$uid"),
+                        bodyJson = JSONObject().apply {
+                            put("role", "admin")
+                            put("updated_at", SupabaseMappers.nowIso())
+                        }
+                    )
                     existing.copy(role = "admin")
                 } else {
                     existing
                 }
                 Result.success(promoted)
             } else {
-                val role = if (isVerifiedAdminEmail(email)) "admin" else "student"
-                val initial = UserProfile(
-                    id = uid,
-                    userId = uid,
-                    displayName = displayName.ifBlank { "StudyHub Student" },
-                    email = email,
-                    selectedClass = 7L,
-                    role = role,
-                    subscriptionTier = "free",
-                    avgScore = 87L,
-                    dayStreak = 15L,
-                    points = 120L,
-                    dailyGoalCount = 5L,
-                    dailyCompletedCount = 3L,
-                    darkThemeEnabled = role == "admin",
-                    notificationsEnabled = true,
-                    examRemindersEnabled = true,
-                    newMaterialsEnabled = true
-                )
-                docRef.set(initial.toCreateMap()).await()
-                Result.success(initial)
+                supabase.upsertOne("user_profiles", defaultProfile.toSupabaseJson(uid))
+                Result.success(defaultProfile)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.GET, path)
+            handleCloudError(e, OperationType.GET, path)
             Result.failure(e)
         }
     }
@@ -141,57 +166,50 @@ class StudyHubRepository(
     fun observeUserProfile(uid: String): Flow<UserProfile?> = flow {
         val activeUid = requireUserId()
         if (activeUid != uid) return@flow
-        val path = "users/$uid"
-        emitAll(
-            db.collection("users").document(uid)
-                .snapshots()
-                .map { snap ->
-                    if (snap.exists()) {
-                        snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    } else null
-                }
-                .catch { error ->
-                    val fsErr = unwrapFirestoreError(error)
-                    if (fsErr == null && error is CancellationException) throw error
-                    if (auth.currentUser?.uid == uid) {
-                        handleFirestoreError(fsErr ?: error, OperationType.GET, path)
-                    }
-                    throw error
-                }
-        )
+
+        suspend fun fetchOnce(): UserProfile? {
+            if (!supabase.isConfigured()) return null
+            val rows = supabase.select("user_profiles", mapOf("id" to "eq.$uid"), limit = 1)
+            return if (rows.length() > 0) SupabaseMappers.userProfileFromJson(rows.getJSONObject(0)) else null
+        }
+
+        runCatching { fetchOnce() }.onSuccess { emit(it) }
+        profileRefreshTrigger.collect {
+            runCatching { fetchOnce() }.onSuccess { emit(it) }
+        }
     }
 
     suspend fun updateUserProfileFields(uid: String, fields: Map<String, Any>): Result<Unit> {
-        val path = "users/$uid"
+        val path = "user_profiles/$uid"
         return try {
             val activeUid = requireUserId()
             check(activeUid == uid) { "Cannot update another user's profile." }
-            val payload = fields.toMutableMap().apply {
-                remove("userId")
-                remove("createdAt")
-                put("updatedAt", FieldValue.serverTimestamp())
+            if (supabase.isConfigured()) {
+                val payload = SupabaseMappers.userProfilePatchToSnakeCase(fields)
+                supabase.updateWhere("user_profiles", mapOf("id" to "eq.$uid"), payload)
+                profileRefreshTrigger.tryEmit(Unit)
             }
-            db.collection("users").document(uid).update(payload).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, path)
+            handleCloudError(e, OperationType.UPDATE, path)
             Result.failure(e)
         }
     }
 
     suspend fun deleteUserAccountData(uid: String): Result<Unit> {
-        val path = "users/$uid"
+        val path = "user_profiles/$uid"
         return try {
             val activeUid = requireUserId()
             check(activeUid == uid) { "Cannot delete another user's account." }
-            val userRef = db.collection("users").document(uid)
-            listOf("bookmarks", "quiz_attempts", "reading_progress", "downloads").forEach { sub ->
-                val docs = userRef.collection(sub).get().await()
-                docs.documents.forEach { it.reference.delete().await() }
+            if (supabase.isConfigured()) {
+                val userFilter = mapOf("user_id" to "eq.$uid")
+                listOf("bookmarks", "quiz_attempts", "reading_progress", "downloads").forEach { table ->
+                    supabase.deleteWhere(table, userFilter)
+                }
+                supabase.deleteWhere("user_profiles", mapOf("id" to "eq.$uid"))
             }
-            userRef.delete().await()
             dao.clearUserBookmarks(uid)
             dao.clearUserQuizAttempts(uid)
             dao.clearUserReadingProgress(uid)
@@ -201,7 +219,7 @@ class StudyHubRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, path)
+            handleCloudError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }
@@ -224,9 +242,6 @@ class StudyHubRepository(
 
     fun observeLocalQuizzes(): Flow<List<QuizItem>> =
         dao.observeAllQuizzes().map { list -> list.map { it.toDomain() } }
-
-    fun observeLocalQuestions(quizId: String): Flow<List<QuizQuestion>> =
-        dao.observeQuestionsForQuiz(quizId).map { list -> list.map { it.toDomain() } }
 
     fun observeAllLocalQuestions(): Flow<List<QuizQuestion>> =
         dao.observeAllQuestions().map { list -> list.map { it.toDomain() } }
@@ -252,244 +267,62 @@ class StudyHubRepository(
     fun observePendingSyncCount(userId: String): Flow<Int> =
         dao.observePendingSync(userId).map { it.size }
 
-    // Cloud -> Room Sync Listeners (Auth-gated & query-aligned with published == true for students)
     fun observeCloudAnnouncements(isAdmin: Boolean): Flow<List<AnnouncementItem>> = flow {
         requireUserId()
-        val query = if (isAdmin) db.collection("announcements")
-        else db.collection("announcements").whereEqualTo("published", true)
-        emitAll(
-            query.snapshots()
-                .map { snap -> snap.toObjects(AnnouncementItem::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
-                .catch { error ->
-                    val fsErr = unwrapFirestoreError(error)
-                    if (fsErr == null && error is CancellationException) throw error
-                    handleFirestoreError(fsErr ?: error, OperationType.LIST, "announcements")
-                    emit(SeedCurriculumData.defaultAnnouncements)
-                }
-        )
+        suspend fun fetchList(): List<AnnouncementItem> {
+            if (!supabase.isConfigured()) return SeedCurriculumData.defaultAnnouncements
+            val filters = if (isAdmin) emptyMap() else mapOf("published" to "eq.true")
+            val arr = supabase.select("announcements", filters, order = "created_at.desc")
+            val parsed = (0 until arr.length()).map { i ->
+                SupabaseMappers.announcementFromJson(arr.getJSONObject(i))
+            }
+            return parsed.ifEmpty { SeedCurriculumData.defaultAnnouncements }
+        }
+
+        emit(runCatching { fetchList() }.getOrElse {
+            handleCloudError(it, OperationType.LIST, "announcements")
+            SeedCurriculumData.defaultAnnouncements
+        })
+        cloudRefreshTrigger.collect {
+            runCatching { fetchList() }.onSuccess { emit(it) }
+        }
     }
 
     fun observeCloudAppSettings(): Flow<AppSettings> = flow {
         requireUserId()
-        emitAll(
-            db.collection("app_settings")
-                .whereEqualTo("published", true)
-                .snapshots()
-                .map { snap ->
-                    snap.toObjects(AppSettings::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                        .firstOrNull() ?: SeedCurriculumData.defaultAppSettings
-                }
-                .catch { error ->
-                    val fsErr = unwrapFirestoreError(error)
-                    if (fsErr == null && error is CancellationException) throw error
-                    handleFirestoreError(fsErr ?: error, OperationType.LIST, "app_settings")
-                    emit(SeedCurriculumData.defaultAppSettings)
-                }
-        )
+        suspend fun fetchSettings(): AppSettings {
+            if (!supabase.isConfigured()) return SeedCurriculumData.defaultAppSettings
+            val arr = supabase.select("app_settings", mapOf("published" to "eq.true"), limit = 1)
+            return if (arr.length() > 0) {
+                SupabaseMappers.appSettingsFromJson(arr.getJSONObject(0))
+            } else {
+                SeedCurriculumData.defaultAppSettings
+            }
+        }
+
+        emit(runCatching { fetchSettings() }.getOrElse {
+            handleCloudError(it, OperationType.LIST, "app_settings")
+            SeedCurriculumData.defaultAppSettings
+        })
+        cloudRefreshTrigger.collect {
+            runCatching { fetchSettings() }.onSuccess { emit(it) }
+        }
     }
 
     suspend fun syncCurriculumFromCloud(isAdmin: Boolean): Result<Unit> {
-        return try {
-            requireUserId()
-            val classesQuery = if (isAdmin) db.collection("classes") else db.collection("classes").whereEqualTo("published", true)
-            val subjectsQuery = if (isAdmin) db.collection("subjects") else db.collection("subjects").whereEqualTo("published", true)
-            val chaptersQuery = if (isAdmin) db.collection("chapters") else db.collection("chapters").whereEqualTo("published", true)
-            val materialsQuery = if (isAdmin) db.collection("study_materials") else db.collection("study_materials").whereEqualTo("published", true)
-            val quizzesQuery = if (isAdmin) db.collection("quizzes") else db.collection("quizzes").whereEqualTo("published", true)
-            val papersQuery = if (isAdmin) db.collection("exam_papers") else db.collection("exam_papers").whereEqualTo("published", true)
-
-            val classes = classesQuery.get().await().toObjects(SchoolClass::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            val subjects = subjectsQuery.get().await().toObjects(SubjectItem::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            val chapters = chaptersQuery.get().await().toObjects(ChapterItem::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            val materials = materialsQuery.get().await().toObjects(StudyMaterial::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            val quizzes = quizzesQuery.get().await().toObjects(QuizItem::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            val papers = papersQuery.get().await().toObjects(ExamPaper::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-
-            if (classes.isNotEmpty()) {
-                dao.upsertClasses(classes.map { CachedClassEntity(it.id, it.grade, it.name, it.description, it.studentCount, it.published) })
-            }
-            if (subjects.isNotEmpty()) {
-                dao.upsertSubjects(subjects.map { CachedSubjectEntity(it.id, it.classGrade, it.name, it.subtitle, it.iconKey, it.colorKey, it.chapterCount, it.published) })
-            }
-            if (chapters.isNotEmpty()) {
-                dao.upsertChapters(chapters.map { CachedChapterEntity(it.id, it.classGrade, it.subjectId, it.subjectName, it.chapterNumber, it.title, it.summary, it.published) })
-            }
-            if (materials.isNotEmpty()) {
-                val existingDownloaded = dao.observeAllMaterials().first().associateBy { it.id }
-                dao.upsertMaterials(materials.map { m ->
-                    val prev = existingDownloaded[m.id]
-                    CachedMaterialEntity(
-                        id = m.id,
-                        classGrade = m.classGrade,
-                        subjectId = m.subjectId,
-                        subjectName = m.subjectName,
-                        chapterId = m.chapterId,
-                        chapterTitle = m.chapterTitle,
-                        title = m.title,
-                        description = m.description,
-                        materialType = m.materialType,
-                        contentMarkdown = m.contentMarkdown,
-                        fileSizeLabel = m.fileSizeLabel,
-                        tagsCsv = m.tags.joinToString("|"),
-                        important = m.important,
-                        premiumOnly = m.premiumOnly,
-                        published = m.published,
-                        downloadedOffline = prev?.downloadedOffline ?: false,
-                        downloadedAtMillis = prev?.downloadedAtMillis ?: 0L
-                    )
-                })
-            }
-            if (quizzes.isNotEmpty()) {
-                dao.upsertQuizzes(quizzes.map { q ->
-                    CachedQuizEntity(q.id, q.classGrade, q.subjectId, q.subjectName, q.chapterId, q.chapterTitle, q.title, q.description, q.durationMinutes, q.questionCount, q.premiumOnly, q.published)
-                })
-                for (q in quizzes) {
-                    val qsQuery = if (isAdmin) {
-                        db.collection("quizzes").document(q.id).collection("questions")
-                    } else {
-                        db.collection("quizzes").document(q.id).collection("questions").whereEqualTo("published", true)
-                    }
-                    val qs = qsQuery.get().await().toObjects(QuizQuestion::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    if (qs.isNotEmpty()) {
-                        dao.upsertQuestions(qs.map { qq ->
-                            CachedQuestionEntity(
-                                id = qq.id,
-                                quizId = qq.quizId.ifBlank { q.id },
-                                questionType = qq.questionType,
-                                prompt = qq.prompt,
-                                optionsJoined = qq.options.joinToString("||"),
-                                correctIndicesJoined = qq.correctIndices.joinToString(","),
-                                correctText = qq.correctText,
-                                explanation = qq.explanation,
-                                points = qq.points,
-                                published = qq.published
-                            )
-                        })
-                    }
-                }
-            }
-            if (papers.isNotEmpty()) {
-                val prevPapers = dao.observeAllExamPapers().first().associateBy { it.id }
-                dao.upsertExamPapers(papers.map { p ->
-                    CachedExamPaperEntity(
-                        id = p.id,
-                        classGrade = p.classGrade,
-                        subjectId = p.subjectId,
-                        subjectName = p.subjectName,
-                        title = p.title,
-                        paperCategory = p.paperCategory,
-                        year = p.year,
-                        fileSizeLabel = p.fileSizeLabel,
-                        contentText = p.contentText,
-                        published = p.published,
-                        downloadedOffline = prevPapers[p.id]?.downloadedOffline ?: false
-                    )
-                })
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.LIST, "curriculum_sync")
-            Result.failure(e)
-        }
+        requireUserId()
+        val res = syncHelper.syncCurriculumFromCloud(isAdmin)
+        cloudRefreshTrigger.tryEmit(Unit)
+        return res
     }
 
     suspend fun syncUserSubcollectionsFromCloud(uid: String): Result<Unit> {
-        return try {
-            val activeUid = requireUserId()
-            check(activeUid == uid)
-            val userRef = db.collection("users").document(uid)
-
-            val bookmarks = userRef.collection("bookmarks").get().await()
-                .toObjects(BookmarkRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            if (bookmarks.isNotEmpty()) {
-                dao.upsertBookmarks(bookmarks.map { b ->
-                    CachedBookmarkEntity(
-                        id = b.id,
-                        userId = uid,
-                        materialId = b.materialId,
-                        title = b.title,
-                        subjectName = b.subjectName,
-                        classGrade = b.classGrade,
-                        materialType = b.materialType,
-                        subtitle = b.subtitle,
-                        accentKey = b.accentKey,
-                        savedAtMillis = b.updatedAt?.toDate()?.time ?: System.currentTimeMillis()
-                    )
-                })
-            }
-
-            val attempts = userRef.collection("quiz_attempts").get().await()
-                .toObjects(QuizAttemptRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            if (attempts.isNotEmpty()) {
-                dao.upsertQuizAttempts(attempts.map { a ->
-                    CachedQuizAttemptEntity(
-                        id = a.id,
-                        userId = uid,
-                        quizId = a.quizId,
-                        quizTitle = a.quizTitle,
-                        subjectName = a.subjectName,
-                        classGrade = a.classGrade,
-                        mode = a.mode,
-                        totalQuestions = a.totalQuestions,
-                        correctAnswers = a.correctAnswers,
-                        scorePercent = a.scorePercent,
-                        durationSeconds = a.durationSeconds,
-                        pointsEarned = a.pointsEarned,
-                        attemptedAtMillis = a.createdAt?.toDate()?.time ?: System.currentTimeMillis()
-                    )
-                })
-            }
-
-            val progress = userRef.collection("reading_progress").get().await()
-                .toObjects(ReadingProgressRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            if (progress.isNotEmpty()) {
-                dao.upsertReadingProgressList(progress.map { p ->
-                    CachedReadingProgressEntity(
-                        id = p.id,
-                        userId = uid,
-                        materialId = p.materialId,
-                        title = p.title,
-                        subjectName = p.subjectName,
-                        chapterTitle = p.chapterTitle,
-                        classGrade = p.classGrade,
-                        progressPercent = p.progressPercent,
-                        updatedAtMillis = p.updatedAt?.toDate()?.time ?: System.currentTimeMillis()
-                    )
-                })
-            }
-
-            val downloads = userRef.collection("downloads").get().await()
-                .toObjects(DownloadRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-            if (downloads.isNotEmpty()) {
-                dao.upsertDownloads(downloads.map { d ->
-                    CachedDownloadEntity(
-                        id = d.id,
-                        userId = uid,
-                        materialId = d.materialId,
-                        title = d.title,
-                        subjectName = d.subjectName,
-                        classGrade = d.classGrade,
-                        fileSizeLabel = d.fileSizeLabel,
-                        downloadedAtMillis = d.updatedAt?.toDate()?.time ?: System.currentTimeMillis()
-                    )
-                })
-                downloads.forEach { d ->
-                    dao.setMaterialDownloaded(d.materialId, true, System.currentTimeMillis())
-                }
-            }
-
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.LIST, "users/$uid/subcollections")
-            Result.failure(e)
-        }
+        val activeUid = requireUserId()
+        check(activeUid == uid)
+        return syncHelper.syncUserSubcollectionsFromCloud(uid)
     }
 
-    // Student Offline-First Mutations (Immediate Room write + Queued Sync to Firestore)
+    // Student Offline-First Mutations (Immediate Room write + Queued Sync to Supabase)
     suspend fun toggleBookmarkOfflineFirst(uid: String, material: StudyMaterial, currentlyBookmarked: Boolean): Result<Unit> {
         return try {
             val docId = "bm_${material.id}"
@@ -514,7 +347,7 @@ class StudyHubRepository(
                     "hindi" -> "pink"
                     else -> "blue"
                 }
-                val subtitle = com.example.data.model.MaterialType.fromKey(material.materialType).label
+                val subtitle = MaterialType.fromKey(material.materialType).label
                 dao.upsertBookmark(
                     CachedBookmarkEntity(
                         id = docId,
@@ -721,131 +554,21 @@ class StudyHubRepository(
 
     // Admin CRUD & Seeding Operations
     suspend fun seedCurriculumToCloudIfEmpty(): Result<Unit> {
-        return try {
-            requireUserId()
-            val existing = db.collection("classes").limit(1).get().await()
-            if (!existing.isEmpty) return Result.success(Unit)
-
-            SeedCurriculumData.classes.forEach { c ->
-                val item = c.toDomain()
-                db.collection("classes").document(c.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.subjects.forEach { s ->
-                val item = s.toDomain()
-                db.collection("subjects").document(s.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.chapters.forEach { ch ->
-                val item = ch.toDomain()
-                db.collection("chapters").document(ch.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.materials.forEach { m ->
-                val item = m.toDomain()
-                db.collection("study_materials").document(m.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.quizzes.forEach { q ->
-                val item = q.toDomain()
-                db.collection("quizzes").document(q.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.questions.forEach { qq ->
-                val item = qq.toDomain()
-                db.collection("quizzes").document(item.quizId).collection("questions")
-                    .document(qq.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.examPapers.forEach { ep ->
-                val item = ep.toDomain()
-                db.collection("exam_papers").document(ep.id).set(item.toWriteMap(true)).await()
-            }
-            SeedCurriculumData.defaultAnnouncements.forEach { ann ->
-                db.collection("announcements").document(ann.id).set(ann.toWriteMap(true)).await()
-            }
-            db.collection("app_settings").document("global")
-                .set(SeedCurriculumData.defaultAppSettings.toWriteMap(true)).await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "seed_curriculum")
-            Result.failure(e)
-        }
+        requireUserId()
+        return syncHelper.seedCurriculumToCloudIfEmpty()
     }
 
     suspend fun seedOrRepairCloudCurriculum(): Result<Int> {
-        return try {
-            requireUserId()
-            var createdCount = 0
-
-            val existingClasses = db.collection("classes").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.classes.filter { it.id !in existingClasses }.forEach { c ->
-                db.collection("classes").document(c.id).set(c.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val existingSubjects = db.collection("subjects").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.subjects.filter { it.id !in existingSubjects }.forEach { s ->
-                db.collection("subjects").document(s.id).set(s.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val existingChapters = db.collection("chapters").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.chapters.filter { it.id !in existingChapters }.forEach { ch ->
-                db.collection("chapters").document(ch.id).set(ch.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val existingMaterials = db.collection("study_materials").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.materials.filter { it.id !in existingMaterials }.forEach { m ->
-                db.collection("study_materials").document(m.id).set(m.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val existingQuizzes = db.collection("quizzes").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.quizzes.filter { it.id !in existingQuizzes }.forEach { q ->
-                db.collection("quizzes").document(q.id).set(q.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val questionsByQuiz = SeedCurriculumData.questions.groupBy { it.quizId }
-            questionsByQuiz.forEach { (quizId, qs) ->
-                val existingQs = db.collection("quizzes").document(quizId).collection("questions")
-                    .get().await().documents.map { it.id }.toSet()
-                qs.filter { it.id !in existingQs }.forEach { qq ->
-                    db.collection("quizzes").document(quizId).collection("questions")
-                        .document(qq.id).set(qq.toDomain().toWriteMap(true)).await()
-                    createdCount++
-                }
-            }
-
-            val existingPapers = db.collection("exam_papers").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.examPapers.filter { it.id !in existingPapers }.forEach { ep ->
-                db.collection("exam_papers").document(ep.id).set(ep.toDomain().toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val existingAnnouncements = db.collection("announcements").get().await().documents.map { it.id }.toSet()
-            SeedCurriculumData.defaultAnnouncements.filter { it.id !in existingAnnouncements }.forEach { ann ->
-                db.collection("announcements").document(ann.id).set(ann.toWriteMap(true)).await()
-                createdCount++
-            }
-
-            val settingsRef = db.collection("app_settings").document("global")
-            if (!settingsRef.get().await().exists()) {
-                settingsRef.set(SeedCurriculumData.defaultAppSettings.toWriteMap(true)).await()
-                createdCount++
-            }
-
-            Result.success(createdCount)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "repair_curriculum")
-            Result.failure(e)
-        }
+        requireUserId()
+        val res = syncHelper.seedOrRepairCloudCurriculum()
+        if (res.isSuccess) cloudRefreshTrigger.tryEmit(Unit)
+        return res
     }
 
     suspend fun resetLocalCacheAndResync(isAdmin: Boolean): Result<Unit> {
         return try {
             dao.clearCurriculumCache()
-            ensureLocalSeedData()
+            syncHelper.ensureLocalSeedData(force = true)
             syncCurriculumFromCloud(isAdmin)
         } catch (e: CancellationException) {
             throw e
@@ -858,43 +581,59 @@ class StudyHubRepository(
         val docId = item.id.ifBlank { "class_${item.grade}" }
         return try {
             requireUserId()
-            val ref = db.collection("classes").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("classes", item.toSupabaseJson(docId))
+                syncHelper.markCloudSeedDone()
+            }
+            syncHelper.markLocalSeedDone()
             dao.upsertClasses(listOf(CachedClassEntity(docId, item.grade, item.name, item.description, item.studentCount, item.published)))
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "classes/$docId")
+            handleCloudError(e, OperationType.WRITE, "classes/$docId")
             Result.failure(e)
         }
     }
 
     suspend fun deleteSchoolClass(classId: String): Result<Unit> {
-        val res = deleteAdminDoc("classes", classId)
-        if (res.isSuccess) dao.deleteClassById(classId)
-        return res
+        if (classId.isBlank()) return Result.failure(IllegalArgumentException("Invalid class ID"))
+        return try {
+            requireUserId()
+            if (supabase.isConfigured()) {
+                supabase.deleteWhere("classes", mapOf("id" to "eq.$classId"))
+                syncHelper.markCloudSeedDone()
+            }
+            syncHelper.markLocalSeedDone()
+            dao.deleteClassById(classId)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.DELETE, "classes/$classId")
+            Result.failure(e)
+        }
     }
 
     suspend fun saveSubject(item: SubjectItem, isCreate: Boolean): Result<Unit> {
         val docId = item.id.ifBlank { "sub_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            val ref = db.collection("subjects").document(docId)
-            val writeAsCreate = isCreate || !ref.get().await().exists()
-            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("subjects", item.toSupabaseJson(docId))
+            }
             dao.upsertSubjects(listOf(CachedSubjectEntity(docId, item.classGrade, item.name, item.subtitle, item.iconKey, item.colorKey, item.chapterCount, item.published)))
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "subjects/$docId")
+            handleCloudError(e, OperationType.WRITE, "subjects/$docId")
             Result.failure(e)
         }
     }
 
     suspend fun deleteSubject(subjectId: String): Result<Unit> {
-        val res = deleteAdminDoc("subjects", subjectId)
+        val res = deleteAdminRow("subjects", subjectId)
         if (res.isSuccess) dao.deleteSubjectById(subjectId)
         return res
     }
@@ -903,14 +642,15 @@ class StudyHubRepository(
         val docId = item.id.ifBlank { "chap_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            val ref = db.collection("chapters").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("chapters", item.toSupabaseJson(docId))
+            }
             dao.upsertChapters(listOf(CachedChapterEntity(docId, item.classGrade, item.subjectId, item.subjectName, item.chapterNumber, item.title, item.summary, item.published)))
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "chapters/$docId")
+            handleCloudError(e, OperationType.WRITE, "chapters/$docId")
             Result.failure(e)
         }
     }
@@ -919,9 +659,9 @@ class StudyHubRepository(
         val docId = item.id.ifBlank { "mat_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            val ref = db.collection("study_materials").document(docId)
-            val writeAsCreate = isCreate || !ref.get().await().exists()
-            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("study_materials", item.toSupabaseJson(docId))
+            }
             val prev = dao.getMaterialById(docId)
             dao.upsertMaterials(
                 listOf(
@@ -947,13 +687,13 @@ class StudyHubRepository(
                 )
             )
             if (!isCreate) {
-                updateAttachmentsPublishedState(docId, item.published)
+                syncHelper.updateAttachmentsPublishedState(docId, item.published)
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "study_materials/$docId")
+            handleCloudError(e, OperationType.WRITE, "study_materials/$docId")
             Result.failure(e)
         }
     }
@@ -974,9 +714,9 @@ class StudyHubRepository(
                 item.fileSizeLabel.ifBlank { "Notes" }
             }
             val finalItem = item.copy(id = docId, fileSizeLabel = finalSizeLabel)
-            val ref = db.collection("study_materials").document(docId)
-            val writeAsCreate = isCreate || !ref.get().await().exists()
-            if (writeAsCreate) ref.set(finalItem.toWriteMap(true)).await() else ref.update(finalItem.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("study_materials", finalItem.toSupabaseJson(docId))
+            }
             val prev = dao.getMaterialById(docId)
             dao.upsertMaterials(
                 listOf(
@@ -1001,20 +741,20 @@ class StudyHubRepository(
                     )
                 )
             )
-            syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
+            syncHelper.syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "study_materials/$docId")
+            handleCloudError(e, OperationType.WRITE, "study_materials/$docId")
             Result.failure(e)
         }
     }
 
     suspend fun deleteStudyMaterial(materialId: String): Result<Unit> {
-        val res = deleteAdminDoc("study_materials", materialId)
+        val res = deleteAdminRow("study_materials", materialId)
         if (res.isSuccess) {
-            deleteRemoteAttachmentsForParent(materialId)
+            syncHelper.deleteRemoteAttachmentsForParent(materialId)
             dao.deleteMaterialById(materialId)
             dao.deleteAttachmentsForParent(materialId)
             AttachmentMediaHelper.deleteParentMediaCache(appContext, materialId)
@@ -1026,26 +766,27 @@ class StudyHubRepository(
         val docId = item.id.ifBlank { "quiz_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            val ref = db.collection("quizzes").document(docId)
-            if (isCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("quizzes", item.toSupabaseJson(docId))
+            }
             dao.upsertQuizzes(listOf(CachedQuizEntity(docId, item.classGrade, item.subjectId, item.subjectName, item.chapterId, item.chapterTitle, item.title, item.description, item.durationMinutes, item.questionCount, item.premiumOnly, item.published)))
             Result.success(docId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "quizzes/$docId")
+            handleCloudError(e, OperationType.WRITE, "quizzes/$docId")
             Result.failure(e)
         }
     }
 
     suspend fun addQuizQuestion(question: QuizQuestion): Result<Unit> {
         val qId = question.id.ifBlank { "q_${System.currentTimeMillis()}" }
-        val path = "quizzes/${question.quizId}/questions/$qId"
+        val path = "quiz_questions/$qId"
         return try {
             requireUserId()
-            db.collection("quizzes").document(question.quizId)
-                .collection("questions").document(qId)
-                .set(question.toWriteMap(true)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("quiz_questions", question.toSupabaseJson(qId))
+            }
             dao.upsertQuestions(
                 listOf(
                     CachedQuestionEntity(
@@ -1066,7 +807,7 @@ class StudyHubRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, path)
+            handleCloudError(e, OperationType.CREATE, path)
             Result.failure(e)
         }
     }
@@ -1075,9 +816,9 @@ class StudyHubRepository(
         val docId = item.id.ifBlank { "paper_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            val ref = db.collection("exam_papers").document(docId)
-            val writeAsCreate = isCreate || !ref.get().await().exists()
-            if (writeAsCreate) ref.set(item.toWriteMap(true)).await() else ref.update(item.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("exam_papers", item.toSupabaseJson(docId))
+            }
             val prevPaper = dao.observeAllExamPapers().first().firstOrNull { it.id == docId }
             dao.upsertExamPapers(
                 listOf(
@@ -1097,13 +838,13 @@ class StudyHubRepository(
                 )
             )
             if (!isCreate) {
-                updateAttachmentsPublishedState(docId, item.published)
+                syncHelper.updateAttachmentsPublishedState(docId, item.published)
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "exam_papers/$docId")
+            handleCloudError(e, OperationType.WRITE, "exam_papers/$docId")
             Result.failure(e)
         }
     }
@@ -1124,9 +865,9 @@ class StudyHubRepository(
                 item.fileSizeLabel.ifBlank { "Text Blueprint" }
             }
             val finalItem = item.copy(id = docId, fileSizeLabel = finalSizeLabel)
-            val ref = db.collection("exam_papers").document(docId)
-            val writeAsCreate = isCreate || !ref.get().await().exists()
-            if (writeAsCreate) ref.set(finalItem.toWriteMap(true)).await() else ref.update(finalItem.toWriteMap(false)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("exam_papers", finalItem.toSupabaseJson(docId))
+            }
             val prevPaper = dao.observeAllExamPapers().first().firstOrNull { it.id == docId }
             dao.upsertExamPapers(
                 listOf(
@@ -1145,20 +886,20 @@ class StudyHubRepository(
                     )
                 )
             )
-            syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
+            syncHelper.syncAttachmentsForParent(parentId = docId, published = finalItem.published, drafts = drafts)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "exam_papers/$docId")
+            handleCloudError(e, OperationType.WRITE, "exam_papers/$docId")
             Result.failure(e)
         }
     }
 
     suspend fun deleteExamPaper(paperId: String): Result<Unit> {
-        val res = deleteAdminDoc("exam_papers", paperId)
+        val res = deleteAdminRow("exam_papers", paperId)
         if (res.isSuccess) {
-            deleteRemoteAttachmentsForParent(paperId)
+            syncHelper.deleteRemoteAttachmentsForParent(paperId)
             dao.deleteExamPaperById(paperId)
             dao.deleteAttachmentsForParent(paperId)
             AttachmentMediaHelper.deleteParentMediaCache(appContext, paperId)
@@ -1170,231 +911,23 @@ class StudyHubRepository(
         parentId: String,
         isAdmin: Boolean
     ): Result<List<ResolvedPaperAttachment>> {
-        if (parentId.isBlank()) return Result.success(emptyList())
-        return try {
-            requireUserId()
-            val query = if (isAdmin) {
-                db.collection("paper_attachments").whereEqualTo("parentId", parentId)
-            } else {
-                db.collection("paper_attachments")
-                    .whereEqualTo("parentId", parentId)
-                    .whereEqualTo("published", true)
-            }
-            val chunks = query.get().await()
-                .toObjects(PaperAttachmentChunk::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-
-            if (chunks.isEmpty()) {
-                dao.deleteAttachmentsForParent(parentId)
-                return Result.success(emptyList())
-            }
-
-            val grouped = chunks.groupBy { it.groupId }
-            val resolved = ArrayList<ResolvedPaperAttachment>(grouped.size)
-            val entities = ArrayList<CachedPaperAttachmentEntity>(grouped.size)
-
-            for ((groupId, groupChunks) in grouped) {
-                val first = groupChunks.minByOrNull { it.chunkIndex } ?: continue
-                val file = AttachmentMediaHelper.decodeChunksToFile(
-                    context = appContext,
-                    parentId = parentId,
-                    groupId = groupId,
-                    fileName = first.fileName,
-                    chunks = groupChunks
-                )
-                resolved.add(
-                    ResolvedPaperAttachment(
-                        groupId = groupId,
-                        parentId = parentId,
-                        kind = first.kind,
-                        fileName = first.fileName,
-                        mimeType = first.mimeType,
-                        sizeBytes = first.sizeBytes,
-                        sortOrder = first.sortOrder,
-                        localFile = file
-                    )
-                )
-                entities.add(
-                    CachedPaperAttachmentEntity(
-                        groupId = groupId,
-                        parentId = parentId,
-                        kind = first.kind,
-                        fileName = first.fileName,
-                        mimeType = first.mimeType,
-                        sizeBytes = first.sizeBytes,
-                        sortOrder = first.sortOrder,
-                        localPath = file.absolutePath,
-                        published = first.published
-                    )
-                )
-            }
-
-            dao.deleteAttachmentsForParent(parentId)
-            dao.upsertPaperAttachments(entities)
-            Result.success(resolved.sortedBy { it.sortOrder })
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            val cached = dao.getAttachmentsForParentOnce(parentId)
-                .filter { (isAdmin || it.published) && File(it.localPath).exists() }
-                .map { it.toDomain() }
-                .sortedBy { it.sortOrder }
-            if (cached.isNotEmpty()) {
-                Result.success(cached)
-            } else {
-                handleFirestoreError(e, OperationType.LIST, "paper_attachments/$parentId")
-                Result.failure(e)
-            }
-        }
-    }
-
-    private suspend fun syncAttachmentsForParent(
-        parentId: String,
-        published: Boolean,
-        drafts: List<PaperAttachmentDraft>
-    ) {
-        val existingRemoteDocs = db.collection("paper_attachments")
-            .whereEqualTo("parentId", parentId)
-            .get()
-            .await()
-            .documents
-
-        val keepGroupIds = drafts.map { it.groupId }.toSet()
-        for (doc in existingRemoteDocs) {
-            val gId = doc.getString("groupId") ?: ""
-            if (gId !in keepGroupIds) {
-                doc.reference.delete().await()
-            }
-        }
-
-        val cachedEntities = ArrayList<CachedPaperAttachmentEntity>(drafts.size)
-        drafts.forEachIndexed { index, draft ->
-            val sortOrder = index.toLong()
-            val cachedFile = AttachmentMediaHelper.copyDraftToParentCache(appContext, parentId, draft)
-            if (draft.isExistingRemote) {
-                val matchingDocs = existingRemoteDocs.filter { it.getString("groupId") == draft.groupId }
-                if (matchingDocs.isNotEmpty()) {
-                    matchingDocs.forEach { doc ->
-                        doc.reference.update(
-                            mapOf(
-                                "published" to published,
-                                "sortOrder" to sortOrder,
-                                "fileName" to draft.fileName.take(180),
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
-                    }
-                } else {
-                    uploadDraftChunks(parentId, published, sortOrder, draft, cachedFile)
-                }
-            } else {
-                uploadDraftChunks(parentId, published, sortOrder, draft, cachedFile)
-            }
-            cachedEntities.add(
-                CachedPaperAttachmentEntity(
-                    groupId = draft.groupId,
-                    parentId = parentId,
-                    kind = draft.kind,
-                    fileName = draft.fileName,
-                    mimeType = draft.mimeType,
-                    sizeBytes = draft.sizeBytes,
-                    sortOrder = sortOrder,
-                    localPath = cachedFile.absolutePath,
-                    published = published
-                )
-            )
-        }
-
-        dao.getAttachmentsForParentOnce(parentId)
-            .filter { it.groupId !in keepGroupIds }
-            .forEach { stale -> runCatching { File(stale.localPath).delete() } }
-        dao.deleteAttachmentsForParent(parentId)
-        if (cachedEntities.isNotEmpty()) {
-            dao.upsertPaperAttachments(cachedEntities)
-        }
-    }
-
-    private suspend fun uploadDraftChunks(
-        parentId: String,
-        published: Boolean,
-        sortOrder: Long,
-        draft: PaperAttachmentDraft,
-        sourceFile: File
-    ) {
-        val fileToRead = if (sourceFile.exists()) sourceFile else draft.previewFile
-        val chunks = AttachmentMediaHelper.chunkFileToBase64(fileToRead)
-        if (chunks.isEmpty()) {
-            throw IllegalStateException("Attachment ${draft.fileName} is empty.")
-        }
-        if (chunks.size > 20) {
-            throw IllegalStateException("Attachment ${draft.fileName} exceeds maximum size limit.")
-        }
-        val totalChunks = chunks.size.toLong()
-        chunks.forEachIndexed { idx, base64 ->
-            val chunkDocId = "${draft.groupId}_c$idx"
-            val chunkObj = PaperAttachmentChunk(
-                id = chunkDocId,
-                parentId = parentId,
-                groupId = draft.groupId,
-                kind = draft.kind,
-                fileName = draft.fileName,
-                mimeType = draft.mimeType,
-                sizeBytes = draft.sizeBytes,
-                chunkIndex = idx.toLong(),
-                totalChunks = totalChunks,
-                sortOrder = sortOrder,
-                published = published,
-                dataBase64 = base64
-            )
-            db.collection("paper_attachments")
-                .document(chunkDocId)
-                .set(chunkObj.toWriteMap(isCreate = true))
-                .await()
-        }
-    }
-
-    private suspend fun updateAttachmentsPublishedState(parentId: String, published: Boolean) {
-        runCatching {
-            val remoteDocs = db.collection("paper_attachments")
-                .whereEqualTo("parentId", parentId)
-                .get()
-                .await()
-                .documents
-            remoteDocs.forEach { doc ->
-                doc.reference.update(
-                    mapOf(
-                        "published" to published,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            }
-            val local = dao.getAttachmentsForParentOnce(parentId)
-            if (local.isNotEmpty()) {
-                dao.upsertPaperAttachments(local.map { it.copy(published = published) })
-            }
-        }
-    }
-
-    private suspend fun deleteRemoteAttachmentsForParent(parentId: String) {
-        runCatching {
-            val remoteDocs = db.collection("paper_attachments")
-                .whereEqualTo("parentId", parentId)
-                .get()
-                .await()
-                .documents
-            remoteDocs.forEach { it.reference.delete().await() }
-        }
+        requireUserId()
+        return syncHelper.loadAttachmentsForParent(parentId, isAdmin)
     }
 
     suspend fun sendAnnouncement(item: AnnouncementItem): Result<Unit> {
         val docId = item.id.ifBlank { "ann_${System.currentTimeMillis()}" }
         return try {
             requireUserId()
-            db.collection("announcements").document(docId).set(item.toWriteMap(true)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("announcements", item.toSupabaseJson(docId))
+                cloudRefreshTrigger.tryEmit(Unit)
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, "announcements/$docId")
+            handleCloudError(e, OperationType.CREATE, "announcements/$docId")
             Result.failure(e)
         }
     }
@@ -1403,18 +936,15 @@ class StudyHubRepository(
         val docId = "global"
         return try {
             requireUserId()
-            val docRef = db.collection("app_settings").document(docId)
-            val exists = docRef.get().await().exists()
-            if (exists) {
-                docRef.update(settings.toWriteMap(false)).await()
-            } else {
-                docRef.set(settings.toWriteMap(true)).await()
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("app_settings", settings.toSupabaseJson())
+                cloudRefreshTrigger.tryEmit(Unit)
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, "app_settings/$docId")
+            handleCloudError(e, OperationType.WRITE, "app_settings/$docId")
             Result.failure(e)
         }
     }
@@ -1422,34 +952,34 @@ class StudyHubRepository(
     suspend fun fetchAllUsersForAdmin(): Result<List<UserProfile>> {
         return try {
             requireUserId()
-            val snap = db.collection("users").get().await()
-            val list = snap.toObjects(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            if (!supabase.isConfigured()) return Result.success(emptyList())
+            val arr = supabase.select("user_profiles", order = "created_at.desc")
+            val list = (0 until arr.length()).map { i ->
+                SupabaseMappers.userProfileFromJson(arr.getJSONObject(i))
+            }
             Result.success(list)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.LIST, "users")
+            handleCloudError(e, OperationType.LIST, "user_profiles")
             Result.failure(e)
         }
     }
 
-    private suspend fun deleteAdminDoc(collection: String, id: String): Result<Unit> {
+    private suspend fun deleteAdminRow(table: String, id: String): Result<Unit> {
         return try {
             requireUserId()
-            db.collection(collection).document(id).delete().await()
+            if (supabase.isConfigured()) {
+                supabase.deleteWhere(table, mapOf("id" to "eq.$id"))
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, "$collection/$id")
+            handleCloudError(e, OperationType.DELETE, "$table/$id")
             Result.failure(e)
         }
     }
-
-    private fun unwrapFirestoreError(error: Throwable): FirebaseFirestoreException? =
-        generateSequence(error) { it.cause }
-            .filterIsInstance<FirebaseFirestoreException>()
-            .firstOrNull()
 
     companion object {
         const val BOOTSTRAP_ADMIN_EMAIL = "momrooja@gmail.com"
