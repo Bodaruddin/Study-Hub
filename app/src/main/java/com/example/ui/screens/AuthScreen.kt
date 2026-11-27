@@ -894,8 +894,13 @@ fun AuthScreen(
                         modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
+                    val projectId = remember { AuthManager.activeProjectId() }
                     Text(
-                        text = "Multi-provider Firebase Auth • Role-verified access",
+                        text = if (projectId != null) {
+                            "Firebase Auth • $projectId"
+                        } else {
+                            "Multi-provider Firebase Auth • Role-verified access"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF9DA9DA)
                     )

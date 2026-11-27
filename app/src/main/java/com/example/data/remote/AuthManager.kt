@@ -10,6 +10,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -60,17 +61,13 @@ object AuthManager {
         awaitClose { auth.removeAuthStateListener(listener) }
     }
 
-    private fun resolveDefaultWebClientId(context: Context): String? {
-        val resId = context.resources.getIdentifier(
-            "default_web_client_id",
-            "string",
-            context.packageName
-        )
-        if (resId == 0) return null
-        return runCatching { context.getString(resId) }
+    fun activeProjectId(): String? =
+        runCatching { Firebase.auth.app.options.projectId }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    private fun resolveDefaultWebClientId(context: Context): String? =
+        runCatching { context.getString(R.string.default_web_client_id) }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
-    }
 
     fun attemptAutoSignIn(
         context: Context,
@@ -159,7 +156,9 @@ object AuthManager {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In failed", e)
-                onAuthError(e.localizedMessage ?: "Sign in failed. Please try again.")
+                val projectTag = activeProjectId()?.let { " (Project: $it)" } ?: ""
+                val detail = e.localizedMessage?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
+                onAuthError("Google Sign-In failed$projectTag: $detail")
             }
         }
     }
@@ -399,11 +398,10 @@ object AuthManager {
             return "An account already exists with this email under a different login method. Sign in with your original provider."
         }
         if (error is FirebaseAuthException) {
+            val projectId = activeProjectId()
+            val projectTag = if (projectId != null) " (Project: $projectId)" else ""
             return when (error.errorCode) {
                 "ERROR_OPERATION_NOT_ALLOWED" -> {
-                    val projectId = runCatching { Firebase.auth.app.options.projectId }.getOrNull()
-                        ?.takeIf { it.isNotBlank() }
-                    val projectTag = if (projectId != null) " (Project: $projectId)" else ""
                     if (providerLabel == "Email/Password") {
                         "Email/Password is blocked on Firebase$projectTag. Enable Email/Password in Authentication → Sign-in method, and ensure 'Enable create (sign-up)' is checked under Authentication → Settings → User actions."
                     } else {
@@ -432,7 +430,7 @@ object AuthManager {
                     "Too many sign-in attempts right now. Please wait and try again."
                 "ERROR_WEB_CONTEXT_CANCELED", "ERROR_USER_CANCELLED" ->
                     "$providerLabel sign-in was cancelled."
-                else -> error.localizedMessage ?: "$providerLabel sign-in failed. Please try again."
+                else -> "${error.errorCode}$projectTag: ${error.localizedMessage ?: "$providerLabel sign-in failed."}"
             }
         }
         return error.localizedMessage ?: "$providerLabel sign-in failed. Please try again."
