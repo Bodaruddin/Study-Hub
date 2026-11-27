@@ -124,7 +124,9 @@ fun AdminSubmoduleScaffold(
     onOpenAddClass: () -> Unit,
     onDeleteClass: (String) -> Unit,
     onOpenAddSubject: () -> Unit,
-    onSaveChapter: (ChapterItem, Boolean) -> Unit,
+    onSaveChapter: (ChapterItem, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
+    onTogglePublishChapter: (ChapterItem) -> Unit,
+    onDeleteChapter: (String) -> Unit,
     onOpenUploadMaterial: () -> Unit,
     onEditMaterial: (StudyMaterial) -> Unit,
     onTogglePublishMaterial: (StudyMaterial) -> Unit,
@@ -148,6 +150,31 @@ fun AdminSubmoduleScaffold(
 
     var showPaperDialog by remember { mutableStateOf(false) }
     var editingPaper by remember { mutableStateOf<ExamPaper?>(null) }
+    var showChapterDialog by remember { mutableStateOf(false) }
+    var editingChapter by remember { mutableStateOf<ChapterItem?>(null) }
+
+    if (showChapterDialog || editingChapter != null) {
+        val targetChapter = editingChapter
+        AdminChapterEditorDialog(
+            subjects = subjects,
+            existingChapters = chapters,
+            initialChapter = targetChapter,
+            onLoadAttachments = onLoadAttachments,
+            onDismiss = {
+                showChapterDialog = false
+                editingChapter = null
+            },
+            onSave = { chapter, drafts, onDone ->
+                onSaveChapter(chapter, targetChapter == null, drafts) { ok ->
+                    onDone(ok)
+                    if (ok) {
+                        showChapterDialog = false
+                        editingChapter = null
+                    }
+                }
+            }
+        )
+    }
 
     if (showPaperDialog || editingPaper != null) {
         val target = editingPaper
@@ -312,50 +339,91 @@ fun AdminSubmoduleScaffold(
 
                 AdminModule.CHAPTERS -> {
                     item {
-                        var showChapDialog by remember { mutableStateOf(false) }
-                        if (showChapDialog) {
-                            var title by remember { mutableStateOf("") }
-                            var summary by remember { mutableStateOf("") }
-                            var grade by remember { mutableLongStateOf(7L) }
-                            AlertDialog(
-                                onDismissRequest = { showChapDialog = false },
-                                title = { Text("Add Chapter") },
-                                text = {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Chapter Title") })
-                                        OutlinedTextField(value = summary, onValueChange = { summary = it }, label = { Text("Summary") })
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(onClick = {
-                                        if (title.isNotBlank()) {
-                                            onSaveChapter(
-                                                ChapterItem(
-                                                    classGrade = grade,
-                                                    subjectId = "sub_english_$grade",
-                                                    subjectName = "English",
-                                                    chapterNumber = (chapters.size + 1).toLong(),
-                                                    title = title.trim(),
-                                                    summary = summary.trim(),
-                                                    published = true
-                                                ),
-                                                true
-                                            )
-                                            showChapDialog = false
-                                        }
-                                    }) { Text("Save") }
-                                },
-                                dismissButton = { TextButton(onClick = { showChapDialog = false }) { Text("Cancel") } }
-                            )
+                        AdminActionHeader("Chapters (${chapters.size})", "Add Chapter") {
+                            editingChapter = null
+                            showChapterDialog = true
                         }
-                        AdminActionHeader("Chapters (${chapters.size})", "Add Chapter") { showChapDialog = true }
                     }
                     items(chapters, key = { it.id }) { ch ->
-                        AdminDarkRowCard(
-                            title = "Class ${ch.classGrade} • ${ch.subjectName} — Ch ${ch.chapterNumber}",
-                            subtitle = ch.title,
-                            badge = if (ch.published) "Published" else "Draft"
-                        )
+                        Tactile3DCard(
+                            faceBrush = Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF1D2761).copy(alpha = 0.94f),
+                                    Color(0xFF11173D).copy(alpha = 0.96f)
+                                )
+                            ),
+                            depthColor = Color(0xFF070B21),
+                            shadowColor = Color(0xFF05081A),
+                            highlightBorderColor = Color.White.copy(alpha = 0.28f),
+                            borderEndColor = NavyCardBorder,
+                            cornerRadius = 18.dp,
+                            depthHeight = 4.dp,
+                            floatingLift = 4.dp,
+                            glassGlossAlpha = 0.65f,
+                            onClick = { editingChapter = ch },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Class ${ch.classGrade} • ${ch.subjectName} — Ch ${ch.chapterNumber}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = ch.title,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFFD5DCFA),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (ch.summary.isNotBlank()) {
+                                        Text(
+                                            text = ch.summary,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF9AA5D1),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { editingChapter = ch },
+                                    modifier = Modifier.testTag("edit_chapter_${ch.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Edit,
+                                        contentDescription = "Edit chapter, PDF & images",
+                                        tint = Color(0xFFC5A6FF)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onTogglePublishChapter(ch) },
+                                    modifier = Modifier.testTag("publish_chapter_${ch.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = if (ch.published) Icons.Rounded.Publish else Icons.Rounded.Unpublished,
+                                        contentDescription = if (ch.published) "Published (tap to draft)" else "Draft (tap to publish)",
+                                        tint = if (ch.published) GreenStart else OrangeStart
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteChapter(ch.id) },
+                                    modifier = Modifier.testTag("delete_chapter_${ch.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = "Delete chapter",
+                                        tint = DangerRed
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -917,6 +985,321 @@ fun AdminAddSubjectDialog(onDismiss: () -> Unit, onSave: (SubjectItem) -> Unit) 
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun AdminChapterEditorDialog(
+    subjects: List<SubjectItem>,
+    existingChapters: List<ChapterItem>,
+    initialChapter: ChapterItem?,
+    onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
+    onDismiss: () -> Unit,
+    onSave: (ChapterItem, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var selectedGrade by remember(initialChapter?.id) {
+        mutableLongStateOf(initialChapter?.classGrade ?: 7L)
+    }
+    var subjectName by remember(initialChapter?.id) {
+        mutableStateOf(initialChapter?.subjectName?.ifBlank { "English" } ?: "English")
+    }
+    var chapterNumText by remember(initialChapter?.id) {
+        mutableStateOf(
+            (initialChapter?.chapterNumber ?: (existingChapters.size + 1).toLong()).toString()
+        )
+    }
+    var title by remember(initialChapter?.id) { mutableStateOf(initialChapter?.title ?: "") }
+    var summary by remember(initialChapter?.id) { mutableStateOf(initialChapter?.summary ?: "") }
+    var publishNow by remember(initialChapter?.id) { mutableStateOf(initialChapter?.published ?: true) }
+    var drafts by remember(initialChapter?.id) { mutableStateOf<List<PaperAttachmentDraft>>(emptyList()) }
+    var loadingAttachments by remember(initialChapter?.id) { mutableStateOf(initialChapter != null) }
+    var isProcessingFile by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialChapter?.id) {
+        if (initialChapter != null) {
+            loadingAttachments = true
+            onLoadAttachments(initialChapter.id).onSuccess { list ->
+                drafts = list.map { att ->
+                    PaperAttachmentDraft(
+                        groupId = att.groupId,
+                        kind = att.kind,
+                        fileName = att.fileName,
+                        mimeType = att.mimeType,
+                        sizeBytes = att.sizeBytes,
+                        previewFile = att.localFile,
+                        isExistingRemote = true
+                    )
+                }
+            }
+            loadingAttachments = false
+        }
+    }
+
+    // Zero-permission Photo Picker & SAF PDF Picker (Google Play Policy compliant)
+    val multiImagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(5)
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            isProcessingFile = true
+            errorMessage = null
+            val added = ArrayList<PaperAttachmentDraft>()
+            uris.forEachIndexed { idx, uri ->
+                AttachmentMediaHelper.prepareImageDraft(context, uri, drafts.size + idx)
+                    .onSuccess { added.add(it) }
+                    .onFailure { errorMessage = it.message ?: "Failed to read selected image." }
+            }
+            if (added.isNotEmpty()) {
+                drafts = drafts + added
+            }
+            isProcessingFile = false
+        }
+    }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isProcessingFile = true
+            errorMessage = null
+            AttachmentMediaHelper.preparePdfDraft(context, uri)
+                .onSuccess { pdfDraft ->
+                    drafts = drafts + pdfDraft
+                }
+                .onFailure { err ->
+                    errorMessage = err.message ?: "Failed to read selected PDF."
+                }
+            isProcessingFile = false
+        }
+    }
+
+    val gradeSubjects = remember(subjects, selectedGrade) {
+        subjects.filter { it.classGrade == selectedGrade }.map { it.name }.distinct()
+            .ifEmpty { listOf("English", "Hindi", "Mathematics", "Science", "Social Science") }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = {
+            Text(
+                text = if (initialChapter == null) "Add Chapter" else "Update Chapter",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Class", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    (6L..12L).forEach { g ->
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { selectedGrade = g }
+                                .testTag("chapter_class_$g"),
+                            color = if (selectedGrade == g) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "Class $g",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                color = if (selectedGrade == g) Color.White else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+
+                Text("Subject", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    gradeSubjects.forEach { subj ->
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { subjectName = subj },
+                            color = if (subjectName.equals(subj, ignoreCase = true)) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = subj,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                color = if (subjectName.equals(subj, ignoreCase = true)) Color.White else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = subjectName,
+                        onValueChange = { subjectName = it },
+                        label = { Text("Subject") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.4f)
+                    )
+                    OutlinedTextField(
+                        value = chapterNumText,
+                        onValueChange = { chapterNumText = it.filter { ch -> ch.isDigit() }.take(3) },
+                        label = { Text("Ch #") },
+                        singleLine = true,
+                        modifier = Modifier.weight(0.7f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Chapter Title") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chapter_title_input")
+                )
+                OutlinedTextField(
+                    value = summary,
+                    onValueChange = { summary = it },
+                    label = { Text("Summary") },
+                    minLines = 2,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chapter_summary_input")
+                )
+
+                Text(
+                    text = "PDF & Chapter Images",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { pdfPicker.launch(arrayOf("application/pdf")) },
+                        enabled = !isProcessingFile && !isSaving,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chapter_attach_pdf_button")
+                    ) {
+                        Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Attach PDF", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            multiImagePicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        enabled = !isProcessingFile && !isSaving,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chapter_attach_images_button")
+                    ) {
+                        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Images", maxLines = 1)
+                    }
+                }
+
+                if (loadingAttachments || isProcessingFile) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text(
+                            text = if (loadingAttachments) "Loading existing attachments..." else "Preparing media...",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                AdminAttachmentDraftStrip(
+                    drafts = drafts,
+                    onRemoveDraft = { groupId ->
+                        drafts = drafts.filterNot { it.groupId == groupId }
+                    }
+                )
+
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage!!,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DangerRed
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Publish Immediately")
+                    Switch(checked = publishNow, onCheckedChange = { publishNow = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSaving && !isProcessingFile && title.isNotBlank(),
+                modifier = Modifier.testTag("save_chapter_button"),
+                onClick = {
+                    val cleanTitle = title.trim()
+                    if (cleanTitle.isEmpty()) return@TextButton
+                    val cleanSubject = subjectName.trim().ifBlank { "English" }
+                    val matchedSubjectId = subjects.firstOrNull {
+                        it.classGrade == selectedGrade && it.name.equals(cleanSubject, ignoreCase = true)
+                    }?.id ?: initialChapter?.subjectId?.takeIf {
+                        initialChapter.classGrade == selectedGrade &&
+                            initialChapter.subjectName.equals(cleanSubject, ignoreCase = true)
+                    } ?: "sub_${cleanSubject.lowercase().replace(" ", "_")}_$selectedGrade"
+                    val parsedNum = (chapterNumText.toLongOrNull() ?: 1L).coerceIn(1L, 999L)
+                    isSaving = true
+                    errorMessage = null
+                    val chapterToSave = (initialChapter ?: ChapterItem()).copy(
+                        classGrade = selectedGrade,
+                        subjectId = matchedSubjectId,
+                        subjectName = cleanSubject,
+                        chapterNumber = parsedNum,
+                        title = cleanTitle,
+                        summary = summary.trim(),
+                        published = publishNow
+                    )
+                    onSave(chapterToSave, drafts) { ok ->
+                        isSaving = false
+                        if (!ok) {
+                            errorMessage = "Save failed. Check connection or file size and retry."
+                        }
+                    }
+                }
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Saving...")
+                } else {
+                    Text(if (initialChapter == null) "Save" else "Update")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = !isSaving,
+                onClick = onDismiss
+            ) { Text("Cancel") }
+        }
     )
 }
 

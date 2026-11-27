@@ -37,6 +37,9 @@ interface StudyHubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChapters(items: List<CachedChapterEntity>)
 
+    @Query("DELETE FROM cached_chapters WHERE id = :id")
+    suspend fun deleteChapterById(id: String)
+
     // Materials
     @Query("SELECT * FROM cached_materials ORDER BY classGrade ASC, title ASC")
     fun observeAllMaterials(): Flow<List<CachedMaterialEntity>>

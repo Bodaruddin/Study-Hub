@@ -186,7 +186,9 @@ fun AdminShellScreen(
     onSaveClass: (SchoolClass, Boolean) -> Unit,
     onDeleteClass: (String) -> Unit,
     onSaveSubject: (SubjectItem, Boolean) -> Unit,
-    onSaveChapter: (ChapterItem, Boolean) -> Unit,
+    onSaveChapter: (ChapterItem, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
+    onTogglePublishChapter: (ChapterItem) -> Unit,
+    onDeleteChapter: (String) -> Unit,
     onSaveMaterial: (StudyMaterial, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishMaterial: (StudyMaterial) -> Unit,
     onDeleteMaterial: (String) -> Unit,
@@ -446,6 +448,8 @@ fun AdminShellScreen(
                         onDeleteClass = onDeleteClass,
                         onOpenAddSubject = { showAddSubjectDialog = true },
                         onSaveChapter = onSaveChapter,
+                        onTogglePublishChapter = onTogglePublishChapter,
+                        onDeleteChapter = onDeleteChapter,
                         onOpenUploadMaterial = {
                             editingMaterial = null
                             showUploadMaterialDialog = true

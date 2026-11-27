@@ -357,6 +357,15 @@ fun StudyMaterialsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    if (activeChapter != null) {
+                        item {
+                            PaperAttachmentGallery(
+                                parentId = activeChapter!!.id,
+                                onLoadAttachments = onLoadAttachments,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                        }
+                    }
                     if (filteredMaterials.isEmpty()) {
                         item {
                             EmptyMaterialsState("No study materials found for this filter yet.")

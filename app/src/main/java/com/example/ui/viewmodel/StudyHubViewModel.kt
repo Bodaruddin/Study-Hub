@@ -517,6 +517,37 @@ class StudyHubViewModel(
         }
     }
 
+    fun saveChapterWithAttachments(
+        item: ChapterItem,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.saveChapterWithAttachments(item, isCreate, drafts)
+                .onSuccess {
+                    _snackbarMessage.value = if (isCreate) "Chapter saved" else "Chapter updated"
+                    onResult(true)
+                }
+                .onFailure {
+                    _snackbarMessage.value = it.message ?: "Failed to save chapter"
+                    onResult(false)
+                }
+        }
+    }
+
+    fun toggleChapterPublish(item: ChapterItem) {
+        saveChapter(item.copy(published = !item.published), isCreate = false)
+    }
+
+    fun deleteChapter(chapterId: String) {
+        viewModelScope.launch {
+            repository.deleteChapter(chapterId)
+                .onSuccess { _snackbarMessage.value = "Chapter deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
+        }
+    }
+
     fun saveStudyMaterial(item: StudyMaterial, isCreate: Boolean) {
         viewModelScope.launch {
             repository.saveStudyMaterial(item, isCreate)

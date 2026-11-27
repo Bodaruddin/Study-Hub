@@ -1,22 +1,29 @@
 package com.example.ui.components
 
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,13 +33,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.ZoomIn
+import androidx.compose.material.icons.rounded.ZoomOutMap
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,23 +62,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.PaperAttachmentDraft
 import com.example.data.model.ResolvedPaperAttachment
 import com.example.data.remote.AttachmentMediaHelper
+import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.ElectricPurple
+import com.example.ui.theme.IndigoHeaderStart
+import com.example.ui.theme.NavyCard
+import com.example.ui.theme.NavyDeep
+import com.example.ui.theme.OutfitFontFamily
 
 @Composable
 fun AdminAttachmentDraftStrip(
@@ -279,7 +303,7 @@ fun PaperAttachmentGallery(
             val images = attachments.filter { it.kind == "image" }
 
             Text(
-                text = "Attached Question Paper Files",
+                text = "Attached PDF & Image Files",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = ElectricPurple
@@ -289,22 +313,31 @@ fun PaperAttachmentGallery(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable { activePdf = pdf }
                         .testTag("open_pdf_${pdf.groupId}"),
-                    shape = RoundedCornerShape(14.dp),
-                    color = ElectricPurple.copy(alpha = 0.12f)
+                    shape = RoundedCornerShape(16.dp),
+                    color = ElectricPurple.copy(alpha = 0.11f),
+                    border = BorderStroke(1.dp, ElectricPurple.copy(alpha = 0.28f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PictureAsPdf,
-                            contentDescription = "Open PDF",
-                            tint = DangerRed,
-                            modifier = Modifier.size(28.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DangerRed.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PictureAsPdf,
+                                contentDescription = "Open PDF",
+                                tint = DangerRed,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -320,12 +353,19 @@ fun PaperAttachmentGallery(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Text(
-                            text = "Open",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
                             color = ElectricPurple
-                        )
+                        ) {
+                            Text(
+                                text = "Open",
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -414,126 +454,488 @@ private fun PdfPageReaderDialog(
     var renderedBitmap by remember(attachment.groupId) { mutableStateOf<Bitmap?>(null) }
     var rendering by remember(attachment.groupId) { mutableStateOf(true) }
 
+    var scale by remember(attachment.groupId, currentPage) { mutableFloatStateOf(1f) }
+    var offset by remember(attachment.groupId, currentPage) { mutableStateOf(Offset.Zero) }
+    var isImmersive by remember(attachment.groupId) { mutableStateOf(false) }
+    var showPageJumpDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(attachment.groupId, currentPage) {
         rendering = true
         val (bmp, total) = AttachmentMediaHelper.renderPdfPage(
             file = attachment.localFile,
             pageIndex = currentPage,
-            targetWidthPx = 1200
+            targetWidthPx = 1440
         )
         renderedBitmap = bmp
         if (total > 0) pageCount = total
         rendering = false
     }
 
+    if (showPageJumpDialog) {
+        AlertDialog(
+            onDismissRequest = { showPageJumpDialog = false },
+            containerColor = NavyCard,
+            titleContentColor = Color.White,
+            textContentColor = Color(0xFFD9E1FF),
+            title = {
+                Text(
+                    text = "Jump to Page",
+                    fontFamily = OutfitFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val pages = (0 until pageCount).toList()
+                    pages.chunked(4).forEach { rowPages ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowPages.forEach { pageIdx ->
+                                val selected = pageIdx == currentPage
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            currentPage = pageIdx
+                                            showPageJumpDialog = false
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selected) ElectricPurple else Color.White.copy(alpha = 0.09f),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selected) CyanAccent else Color.White.copy(alpha = 0.14f)
+                                    )
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "${pageIdx + 1}",
+                                            color = Color.White,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+                                }
+                            }
+                            repeat(4 - rowPages.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPageJumpDialog = false }) {
+                    Text("Cancel", color = CyanAccent)
+                }
+            }
+        )
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surface
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            color = NavyDeep
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.PictureAsPdf,
-                        contentDescription = null,
-                        tint = DangerRed,
-                        modifier = Modifier.size(24.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(IndigoHeaderStart, NavyDeep, Color(0xFF070A1A))
+                        )
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = attachment.fileName,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "Page ${currentPage + 1} of $pageCount",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("close_pdf_reader")
-                    ) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Close PDF reader")
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .verticalScroll(rememberScrollState())
-                        .padding(8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val bmp = renderedBitmap
-                    if (rendering && bmp == null) {
-                        CircularProgressIndicator(color = ElectricPurple)
-                    } else if (bmp != null) {
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "PDF page ${currentPage + 1}",
-                            contentScale = ContentScale.FillWidth,
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    AnimatedVisibility(visible = !isImmersive) {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    } else {
-                        Text(
-                            text = "Unable to render this PDF page.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = DangerRed
-                        )
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(IndigoHeaderStart, NavyCard)
+                                    )
+                                )
+                                .statusBarsPadding()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(Color(0xFFFF5E66), Color(0xFFDC1F32))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PictureAsPdf,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = attachment.fileName,
+                                        fontFamily = OutfitFontFamily,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Page ${currentPage + 1} of $pageCount • ${AttachmentMediaHelper.formatBytesLabel(attachment.sizeBytes)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFB5C1EB),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (scale > 1.05f) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                scale = 1f
+                                                offset = Offset.Zero
+                                            },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = CyanAccent.copy(alpha = 0.16f),
+                                        border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.45f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.ZoomOutMap,
+                                                contentDescription = "Reset zoom",
+                                                tint = CyanAccent,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Fit",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = CyanAccent
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = { isImmersive = true },
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Fullscreen,
+                                        contentDescription = "Full screen view",
+                                        tint = Color.White
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.10f))
+                                        .testTag("close_pdf_reader")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Close PDF reader",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+                            LinearProgressIndicator(
+                                progress = { ((currentPage + 1).toFloat() / pageCount.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.5.dp),
+                                color = ElectricPurple,
+                                trackColor = Color.White.copy(alpha = 0.08f)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .then(
+                                if (isImmersive) {
+                                    Modifier.statusBarsPadding().navigationBarsPadding()
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(horizontal = if (isImmersive) 0.dp else 4.dp, vertical = if (isImmersive) 0.dp else 6.dp)
+                            .pointerInput(currentPage, isImmersive) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (isImmersive) isImmersive = false
+                                    },
+                                    onDoubleTap = {
+                                        if (scale > 1.15f) {
+                                            scale = 1f
+                                            offset = Offset.Zero
+                                        } else {
+                                            scale = 2.2f
+                                        }
+                                    }
+                                )
+                            }
+                            .pointerInput(currentPage) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val nextScale = (scale * zoom).coerceIn(1f, 4f)
+                                    scale = nextScale
+                                    offset = if (nextScale > 1.02f) offset + pan else Offset.Zero
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val bmp = renderedBitmap
+                        if (rendering && bmp == null) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(color = CyanAccent)
+                                Text(
+                                    text = "Rendering page ${currentPage + 1}...",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color(0xFFB5C1EB)
+                                )
+                            }
+                        } else if (bmp != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offset.x,
+                                        translationY = offset.y
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "PDF page ${currentPage + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .shadow(12.dp, RoundedCornerShape(if (isImmersive) 0.dp else 10.dp))
+                                        .clip(RoundedCornerShape(if (isImmersive) 0.dp else 10.dp))
+                                )
+                            }
+
+                            if (rendering) {
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 12.dp),
+                                    shape = RoundedCornerShape(50),
+                                    color = NavyCard.copy(alpha = 0.88f),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            strokeWidth = 2.dp,
+                                            color = CyanAccent
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Loading page ${currentPage + 1}...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Unable to render this PDF page.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = DangerRed,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(visible = !isImmersive) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 22.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                color = NavyCard.copy(alpha = 0.96f),
+                                shadowElevation = 14.dp,
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val hasPrev = currentPage > 0
+                                    val hasNext = currentPage + 1 < pageCount
+
+                                    Button(
+                                        onClick = { if (hasPrev) currentPage-- },
+                                        enabled = hasPrev,
+                                        shape = RoundedCornerShape(18.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.White.copy(alpha = 0.14f),
+                                            contentColor = Color.White,
+                                            disabledContainerColor = Color.White.copy(alpha = 0.05f),
+                                            disabledContentColor = Color.White.copy(alpha = 0.35f)
+                                        ),
+                                        modifier = Modifier
+                                            .defaultMinSize(minHeight = 48.dp)
+                                            .testTag("pdf_prev_page")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                            contentDescription = "Previous page",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Previous",
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .defaultMinSize(minHeight = 44.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable(enabled = pageCount > 1) { showPageJumpDialog = true },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = Color.White.copy(alpha = 0.09f),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "${currentPage + 1} / $pageCount",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { if (hasNext) currentPage++ },
+                                        enabled = hasNext,
+                                        shape = RoundedCornerShape(18.dp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = ElectricPurple,
+                                            contentColor = Color.White,
+                                            disabledContainerColor = Color.White.copy(alpha = 0.05f),
+                                            disabledContentColor = Color.White.copy(alpha = 0.35f)
+                                        ),
+                                        modifier = Modifier
+                                            .defaultMinSize(minHeight = 48.dp)
+                                            .testTag("pdf_next_page")
+                                    ) {
+                                        Text(
+                                            text = "Next",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                            contentDescription = "Next page",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(
-                        onClick = { if (currentPage > 0) currentPage-- },
-                        enabled = currentPage > 0,
-                        modifier = Modifier.testTag("pdf_prev_page")
+                if (isImmersive) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(14.dp)
+                            .clip(RoundedCornerShape(50))
+                            .clickable { isImmersive = false },
+                        shape = RoundedCornerShape(50),
+                        color = NavyCard.copy(alpha = 0.84f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Previous page")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Previous")
-                    }
-                    Text(
-                        text = "${currentPage + 1} / $pageCount",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    TextButton(
-                        onClick = { if (currentPage + 1 < pageCount) currentPage++ },
-                        enabled = currentPage + 1 < pageCount,
-                        modifier = Modifier.testTag("pdf_next_page")
-                    ) {
-                        Text("Next")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = "Next page")
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.FullscreenExit,
+                                contentDescription = "Show controls",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Controls",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -556,13 +958,22 @@ private fun ZoomableImageDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = Color.Black.copy(alpha = 0.94f)
+            shape = RectangleShape,
+            color = Color.Black.copy(alpha = 0.96f)
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            ) {
                 val bmp = bitmap
                 if (bmp == null) {
                     CircularProgressIndicator(
@@ -596,7 +1007,7 @@ private fun ZoomableImageDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.TopCenter)
-                        .padding(16.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {

@@ -646,6 +646,9 @@ class StudyHubRepository(
                 supabase.upsertOne("chapters", item.toSupabaseJson(docId))
             }
             dao.upsertChapters(listOf(CachedChapterEntity(docId, item.classGrade, item.subjectId, item.subjectName, item.chapterNumber, item.title, item.summary, item.published)))
+            if (!isCreate) {
+                syncHelper.updateAttachmentsPublishedState(docId, item.published)
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -653,6 +656,57 @@ class StudyHubRepository(
             handleCloudError(e, OperationType.WRITE, "chapters/$docId")
             Result.failure(e)
         }
+    }
+
+    suspend fun saveChapterWithAttachments(
+        item: ChapterItem,
+        isCreate: Boolean,
+        drafts: List<PaperAttachmentDraft>
+    ): Result<Unit> {
+        val docId = item.id.ifBlank { "chap_${System.currentTimeMillis()}" }
+        return try {
+            requireUserId()
+            val finalItem = item.copy(id = docId)
+            if (supabase.isConfigured()) {
+                supabase.upsertOne("chapters", finalItem.toSupabaseJson(docId))
+            }
+            dao.upsertChapters(
+                listOf(
+                    CachedChapterEntity(
+                        id = docId,
+                        classGrade = finalItem.classGrade,
+                        subjectId = finalItem.subjectId,
+                        subjectName = finalItem.subjectName,
+                        chapterNumber = finalItem.chapterNumber,
+                        title = finalItem.title,
+                        summary = finalItem.summary,
+                        published = finalItem.published
+                    )
+                )
+            )
+            syncHelper.syncAttachmentsForParent(
+                parentId = docId,
+                published = finalItem.published,
+                drafts = drafts
+            )
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.WRITE, "chapters/$docId")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteChapter(chapterId: String): Result<Unit> {
+        val res = deleteAdminRow("chapters", chapterId)
+        if (res.isSuccess) {
+            syncHelper.deleteRemoteAttachmentsForParent(chapterId)
+            dao.deleteChapterById(chapterId)
+            dao.deleteAttachmentsForParent(chapterId)
+            AttachmentMediaHelper.deleteParentMediaCache(appContext, chapterId)
+        }
+        return res
     }
 
     suspend fun saveStudyMaterial(item: StudyMaterial, isCreate: Boolean): Result<Unit> {
