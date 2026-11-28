@@ -194,12 +194,17 @@ fun AdminSubmoduleScaffold(
         )
     }
 
+    val availableGrades = remember(classes) {
+        classes.map { it.grade }.distinct().sorted().ifEmpty { (6L..12L).toList() }
+    }
+
     editingStudent?.let { targetStudent ->
         val uid = targetStudent.id.ifBlank { targetStudent.userId }
         val canBlockOrDelete = targetStudent.role != "admin" && uid != currentAdminUid
         AdminEditStudentDialog(
             student = targetStudent,
             canBlockOrDelete = canBlockOrDelete,
+            availableGrades = availableGrades,
             onDismiss = { editingStudent = null },
             onSave = { name, grade, tier, blocked ->
                 onUpdateStudent(targetStudent, name, grade, tier, blocked)
@@ -227,6 +232,7 @@ fun AdminSubmoduleScaffold(
             subjects = subjects,
             existingChapters = chapters,
             initialChapter = targetChapter,
+            availableGrades = availableGrades,
             onLoadAttachments = onLoadAttachments,
             onDismiss = {
                 showChapterDialog = false
@@ -249,6 +255,7 @@ fun AdminSubmoduleScaffold(
         AdminExamPaperEditorDialog(
             subjects = subjects,
             initialPaper = target,
+            availableGrades = availableGrades,
             onLoadAttachments = onLoadAttachments,
             onDismiss = {
                 showPaperDialog = false
@@ -397,7 +404,7 @@ fun AdminSubmoduleScaffold(
                             onDelete = {
                                 pendingDelete = Triple(
                                     "Delete ${c.name}?",
-                                    "This removes ${c.name} from the classes catalog.",
+                                    "This removes ${c.name} and all its subjects, chapters, materials, quizzes, and exam papers for all students.",
                                     { onDeleteClass(c.id) }
                                 )
                             }
@@ -1351,15 +1358,22 @@ fun AdminChapterEditorDialog(
     subjects: List<SubjectItem>,
     existingChapters: List<ChapterItem>,
     initialChapter: ChapterItem?,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
     onDismiss: () -> Unit,
     onSave: (ChapterItem, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val gradeChoices = remember(availableGrades, initialChapter?.classGrade) {
+        (availableGrades + listOfNotNull(initialChapter?.classGrade))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
 
     var selectedGrade by remember(initialChapter?.id) {
-        mutableLongStateOf(initialChapter?.classGrade ?: 7L)
+        mutableLongStateOf(initialChapter?.classGrade ?: gradeChoices.firstOrNull() ?: 7L)
     }
     var subjectName by remember(initialChapter?.id) {
         mutableStateOf(initialChapter?.subjectName?.ifBlank { "English" } ?: "English")
@@ -1460,7 +1474,7 @@ fun AdminChapterEditorDialog(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -1665,14 +1679,23 @@ fun AdminChapterEditorDialog(
 fun AdminExamPaperEditorDialog(
     subjects: List<SubjectItem>,
     initialPaper: ExamPaper?,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
     onDismiss: () -> Unit,
     onSave: (ExamPaper, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val gradeChoices = remember(availableGrades, initialPaper?.classGrade) {
+        (availableGrades + listOfNotNull(initialPaper?.classGrade))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
 
-    var selectedGrade by remember(initialPaper?.id) { mutableLongStateOf(initialPaper?.classGrade ?: 7L) }
+    var selectedGrade by remember(initialPaper?.id) {
+        mutableLongStateOf(initialPaper?.classGrade ?: gradeChoices.firstOrNull() ?: 7L)
+    }
     var selectedCategory by remember(initialPaper?.id) {
         mutableStateOf(
             if (initialPaper != null) PaperCategory.fromKey(initialPaper.paperCategory)
@@ -1776,7 +1799,7 @@ fun AdminExamPaperEditorDialog(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -2007,14 +2030,23 @@ fun AdminUploadMaterialDialog(
     subjects: List<SubjectItem>,
     chapters: List<ChapterItem>,
     initialMaterial: StudyMaterial? = null,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>> = { Result.success(emptyList()) },
     onDismiss: () -> Unit,
     onSave: (StudyMaterial, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val gradeChoices = remember(availableGrades, initialMaterial?.classGrade) {
+        (availableGrades + listOfNotNull(initialMaterial?.classGrade))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
 
-    var selectedGrade by remember(initialMaterial?.id) { mutableLongStateOf(initialMaterial?.classGrade ?: 7L) }
+    var selectedGrade by remember(initialMaterial?.id) {
+        mutableLongStateOf(initialMaterial?.classGrade ?: gradeChoices.firstOrNull() ?: 7L)
+    }
     var title by remember(initialMaterial?.id) { mutableStateOf(initialMaterial?.title ?: "") }
     var desc by remember(initialMaterial?.id) { mutableStateOf(initialMaterial?.description ?: "") }
     var content by remember(initialMaterial?.id) { mutableStateOf(initialMaterial?.contentMarkdown ?: "") }
@@ -2101,7 +2133,7 @@ fun AdminUploadMaterialDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { selectedGrade = g },
                             color = if (selectedGrade == g) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,

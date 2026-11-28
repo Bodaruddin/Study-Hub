@@ -35,6 +35,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -54,8 +55,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.StudyHubDatabase
@@ -206,6 +210,17 @@ private fun StudyHubApp() {
         val isDatabaseBusy by viewModel.isDatabaseBusy.collectAsStateWithLifecycle()
         val supabaseStatus by viewModel.supabaseStatus.collectAsStateWithLifecycle()
 
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner, viewModel) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    viewModel.refreshOnResume()
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         val snackbarHostState = remember { SnackbarHostState() }
         LaunchedEffect(snackbarMessage) {
             val msg = snackbarMessage
@@ -333,6 +348,7 @@ private fun StudentShellScreen(
     onDeleteAccount: () -> Unit
 ) {
     val profile by viewModel.profile.collectAsStateWithLifecycle()
+    val classes by viewModel.classes.collectAsStateWithLifecycle()
     val subjects by viewModel.subjects.collectAsStateWithLifecycle()
     val chapters by viewModel.chapters.collectAsStateWithLifecycle()
     val materials by viewModel.materials.collectAsStateWithLifecycle()
@@ -351,13 +367,100 @@ private fun StudentShellScreen(
     val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
 
+    val visibleClasses = remember(classes) {
+        classes.filter { it.published }.sortedBy { it.grade }
+    }
+    val visibleGrades = remember(visibleClasses) {
+        visibleClasses.map { it.grade }.toSet()
+    }
+    val effectiveSelectedClass = remember(visibleClasses, visibleGrades, profile.selectedClass) {
+        when {
+            visibleClasses.isEmpty() -> 0L
+            profile.selectedClass in visibleGrades -> profile.selectedClass
+            else -> visibleClasses.first().grade
+        }
+    }
+    val effectiveProfile = remember(profile, effectiveSelectedClass) {
+        if (profile.selectedClass == effectiveSelectedClass) profile
+        else profile.copy(selectedClass = effectiveSelectedClass)
+    }
+    val visibleSubjects = remember(subjects, visibleGrades) {
+        subjects.filter { it.published && it.classGrade in visibleGrades }
+    }
+    val visibleSubjectIds = remember(visibleSubjects) {
+        visibleSubjects.map { it.id }.toSet()
+    }
+    val visibleChapters = remember(chapters, visibleGrades, visibleSubjectIds) {
+        chapters.filter {
+            it.published &&
+                it.classGrade in visibleGrades &&
+                (it.subjectId.isBlank() || it.subjectId in visibleSubjectIds)
+        }
+    }
+    val visibleChapterIds = remember(visibleChapters) {
+        visibleChapters.map { it.id }.toSet()
+    }
+    val visibleMaterials = remember(materials, visibleGrades, visibleSubjectIds, visibleChapterIds) {
+        materials.filter {
+            it.published &&
+                it.classGrade in visibleGrades &&
+                (it.subjectId.isBlank() || it.subjectId in visibleSubjectIds) &&
+                (it.chapterId.isBlank() || it.chapterId in visibleChapterIds)
+        }
+    }
+    val visibleMaterialIds = remember(visibleMaterials) {
+        visibleMaterials.map { it.id }.toSet()
+    }
+    val visibleQuizzes = remember(quizzes, visibleGrades, visibleSubjectIds, visibleChapterIds) {
+        quizzes.filter {
+            it.published &&
+                it.classGrade in visibleGrades &&
+                (it.subjectId.isBlank() || it.subjectId in visibleSubjectIds) &&
+                (it.chapterId.isBlank() || it.chapterId in visibleChapterIds)
+        }
+    }
+    val visibleQuizIds = remember(visibleQuizzes) {
+        visibleQuizzes.map { it.id }.toSet()
+    }
+    val visibleQuestions = remember(allQuestions, visibleQuizIds) {
+        allQuestions.filter { it.published && it.quizId in visibleQuizIds }
+    }
+    val visibleExamPapers = remember(examPapers, visibleGrades, visibleSubjectIds) {
+        examPapers.filter {
+            it.published &&
+                it.classGrade in visibleGrades &&
+                (it.subjectId.isBlank() || it.subjectId in visibleSubjectIds)
+        }
+    }
+    val visibleAnnouncements = remember(announcements, visibleGrades) {
+        announcements.filter { it.published && (it.targetClass == 0L || it.targetClass in visibleGrades) }
+    }
+    val visibleBookmarks = remember(bookmarks, visibleMaterialIds) {
+        bookmarks.filter { it.materialId in visibleMaterialIds }
+    }
+    val visibleDownloads = remember(downloads, visibleMaterialIds) {
+        downloads.filter { it.materialId in visibleMaterialIds }
+    }
+    val visibleProgress = remember(readingProgress, visibleMaterialIds) {
+        readingProgress.filter { it.materialId in visibleMaterialIds }
+    }
+
     var selectedTab by remember { mutableIntStateOf(0) }
     var subRoute by remember { mutableStateOf<StudentSubRoute?>(null) }
     var studyInitialSubject by remember { mutableStateOf<SubjectItem?>(null) }
     var studyInitialMaterial by remember { mutableStateOf<StudyMaterial?>(null) }
     var libraryInitialTab by remember { mutableIntStateOf(0) }
 
-    val bookmarkedIds = remember(bookmarks) { bookmarks.map { it.materialId }.toSet() }
+    LaunchedEffect(visibleSubjects, visibleMaterials) {
+        if (studyInitialSubject != null && visibleSubjects.none { it.id == studyInitialSubject?.id }) {
+            studyInitialSubject = null
+        }
+        if (studyInitialMaterial != null && visibleMaterials.none { it.id == studyInitialMaterial?.id }) {
+            studyInitialMaterial = null
+        }
+    }
+
+    val bookmarkedIds = remember(visibleBookmarks) { visibleBookmarks.map { it.materialId }.toSet() }
     val isPremiumUser = profile.subscriptionTier == "premium"
 
     if (subRoute != null) {
@@ -387,6 +490,7 @@ private fun StudentShellScreen(
                             studyInitialMaterial = null
                         }
                         selectedTab = idx
+                        viewModel.refreshOnResume()
                     }
                 )
             }
@@ -399,8 +503,9 @@ private fun StudentShellScreen(
         ) {
             when (subRoute) {
                 StudentSubRoute.EXAM_PAPERS -> ExamPapersScreen(
-                    selectedClass = profile.selectedClass,
-                    examPapers = examPapers,
+                    selectedClass = effectiveSelectedClass,
+                    availableClasses = visibleClasses,
+                    examPapers = visibleExamPapers,
                     downloadedPaperIds = downloadedPaperIds,
                     onToggleDownloadPaper = viewModel::toggleExamPaperDownload,
                     onSelectClass = viewModel::updateSelectedClass,
@@ -412,18 +517,18 @@ private fun StudentShellScreen(
                 )
 
                 StudentSubRoute.NOTIFICATIONS -> NotificationsScreen(
-                    announcements = announcements,
-                    profile = profile,
+                    announcements = visibleAnnouncements,
+                    profile = effectiveProfile,
                     onUpdatePrefs = viewModel::updateNotificationPrefs,
                     onBack = { subRoute = null }
                 )
 
                 StudentSubRoute.SEARCH -> GlobalSearchScreen(
-                    subjects = subjects,
-                    chapters = chapters,
-                    materials = materials,
-                    questions = allQuestions,
-                    examPapers = examPapers,
+                    subjects = visibleSubjects,
+                    chapters = visibleChapters,
+                    materials = visibleMaterials,
+                    questions = visibleQuestions,
+                    examPapers = visibleExamPapers,
                     onOpenMaterial = { mat ->
                         studyInitialSubject = null
                         studyInitialMaterial = mat
@@ -434,19 +539,20 @@ private fun StudentShellScreen(
                 )
 
                 StudentSubRoute.PREMIUM -> PremiumScreen(
-                    profile = profile,
+                    profile = effectiveProfile,
                     appSettings = appSettings,
                     onBack = { subRoute = null }
                 )
 
                 null -> when (selectedTab) {
                     0 -> StudentHomeScreen(
-                        profile = profile,
-                        subjects = subjects,
-                        materials = materials,
+                        profile = effectiveProfile,
+                        availableClasses = visibleClasses,
+                        subjects = visibleSubjects,
+                        materials = visibleMaterials,
                         downloadedIds = downloadedMaterialIds,
-                        recentProgress = readingProgress,
-                        announcementCount = announcements.size,
+                        recentProgress = visibleProgress,
+                        announcementCount = visibleAnnouncements.size,
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
                         appSettings = appSettings,
@@ -468,14 +574,15 @@ private fun StudentShellScreen(
                         },
                         onOpenQuizzes = { selectedTab = 2 },
                         onStartDailyChallenge = {
-                            val challengeQuiz = quizzes.firstOrNull {
-                                it.published && it.classGrade == profile.selectedClass
-                            } ?: quizzes.firstOrNull { it.published }
+                            val challengeQuiz = if (effectiveSelectedClass > 0L) {
+                                visibleQuizzes.firstOrNull { it.classGrade == effectiveSelectedClass }
+                                    ?: visibleQuizzes.firstOrNull()
+                            } else null
                             if (challengeQuiz != null) {
                                 viewModel.startQuiz(challengeQuiz, QuizMode.PRACTICE, randomize = false)
                                 selectedTab = 2
                             } else {
-                                viewModel.showMessage("Daily Challenge quiz is syncing...")
+                                viewModel.showMessage("No published quiz available right now")
                             }
                         },
                         onOpenExamPapers = { subRoute = StudentSubRoute.EXAM_PAPERS },
@@ -490,10 +597,11 @@ private fun StudentShellScreen(
                     )
 
                     1 -> StudyMaterialsScreen(
-                        selectedClass = profile.selectedClass,
-                        subjects = subjects,
-                        chapters = chapters,
-                        materials = materials,
+                        selectedClass = effectiveSelectedClass,
+                        availableClasses = visibleClasses,
+                        subjects = visibleSubjects,
+                        chapters = visibleChapters,
+                        materials = visibleMaterials,
                         bookmarkedMaterialIds = bookmarkedIds,
                         downloadedMaterialIds = downloadedMaterialIds,
                         isPremiumUser = isPremiumUser,
@@ -515,8 +623,8 @@ private fun StudentShellScreen(
                     )
 
                     2 -> QuizScreen(
-                        selectedClass = profile.selectedClass,
-                        quizzes = quizzes,
+                        selectedClass = effectiveSelectedClass,
+                        quizzes = visibleQuizzes,
                         quizAttempts = quizAttempts,
                         activeQuiz = activeQuiz,
                         onStartQuiz = viewModel::startQuiz,
@@ -535,10 +643,10 @@ private fun StudentShellScreen(
                     )
 
                     3 -> LibraryScreen(
-                        bookmarks = bookmarks,
-                        downloads = downloads,
-                        recentProgress = readingProgress,
-                        allMaterials = materials,
+                        bookmarks = visibleBookmarks,
+                        downloads = visibleDownloads,
+                        recentProgress = visibleProgress,
+                        allMaterials = visibleMaterials,
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
                         initialTab = libraryInitialTab,
@@ -554,7 +662,8 @@ private fun StudentShellScreen(
                     )
 
                     else -> ProfileScreen(
-                        profile = profile,
+                        profile = effectiveProfile,
+                        availableClasses = visibleClasses,
                         isAuthorizedAdmin = viewModel.isAuthorizedAdmin,
                         quizAttempts = quizAttempts,
                         onUpdateName = viewModel::updateDisplayName,

@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,7 @@ import com.example.data.model.AppSettings
 import com.example.data.model.ChapterItem
 import com.example.data.model.MaterialType
 import com.example.data.model.ResolvedPaperAttachment
+import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.ui.components.EthicalAdFreeUpgradeBanner
@@ -86,6 +88,7 @@ import com.example.ui.theme.OutfitFontFamily
 @Composable
 fun StudyMaterialsScreen(
     selectedClass: Long,
+    availableClasses: List<SchoolClass> = emptyList(),
     subjects: List<SubjectItem>,
     chapters: List<ChapterItem>,
     materials: List<StudyMaterial>,
@@ -112,6 +115,18 @@ fun StudyMaterialsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var classDropdownOpen by remember { mutableStateOf(false) }
     var subjectDropdownOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(subjects, chapters, materials, selectedClass) {
+        if (activeSubject != null && subjects.none { it.id == activeSubject?.id && it.classGrade == selectedClass && it.published }) {
+            activeSubject = null
+        }
+        if (activeChapter != null && chapters.none { it.id == activeChapter?.id && it.classGrade == selectedClass && it.published }) {
+            activeChapter = null
+        }
+        if (readingMaterial != null && materials.none { it.id == readingMaterial?.id && it.published }) {
+            readingMaterial = null
+        }
+    }
 
     if (readingMaterial != null) {
         BackHandler { readingMaterial = null }
@@ -228,7 +243,11 @@ fun StudyMaterialsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Class $selectedClass",
+                            text = if (availableClasses.isNotEmpty() && selectedClass > 0L) {
+                                "Class $selectedClass"
+                            } else {
+                                "No Class"
+                            },
                             style = MaterialTheme.typography.labelLarge,
                             color = Color.White,
                             fontWeight = FontWeight.Bold
@@ -246,16 +265,24 @@ fun StudyMaterialsScreen(
                     expanded = classDropdownOpen,
                     onDismissRequest = { classDropdownOpen = false }
                 ) {
-                    (6L..12L).forEach { grade ->
+                    if (availableClasses.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("Class $grade") },
-                            onClick = {
-                                classDropdownOpen = false
-                                activeSubject = null
-                                activeChapter = null
-                                onSelectClass(grade)
-                            }
+                            text = { Text("No published classes") },
+                            enabled = false,
+                            onClick = { classDropdownOpen = false }
                         )
+                    } else {
+                        availableClasses.sortedBy { it.grade }.forEach { schoolClass ->
+                            DropdownMenuItem(
+                                text = { Text(schoolClass.name) },
+                                onClick = {
+                                    classDropdownOpen = false
+                                    activeSubject = null
+                                    activeChapter = null
+                                    onSelectClass(schoolClass.grade)
+                                }
+                            )
+                        }
                     }
                 }
             }

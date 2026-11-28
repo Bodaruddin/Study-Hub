@@ -637,12 +637,48 @@ class StudyHubRepository(
         if (classId.isBlank()) return Result.failure(IllegalArgumentException("Invalid class ID"))
         return try {
             requireAdmin()
+            var grade: Long? = dao.getClassById(classId)?.grade
+            if (grade == null && supabase.isConfigured()) {
+                val rows = supabase.select("classes", mapOf("id" to "eq.$classId"), selectCols = "grade", limit = 1)
+                if (rows.length() > 0) {
+                    grade = rows.optJSONObject(0)?.optLong("grade")?.takeIf { it > 0L }
+                }
+            }
+            if (grade == null) {
+                grade = classId.removePrefix("class_").toLongOrNull()
+            }
+
             if (supabase.isConfigured()) {
+                if (grade != null) {
+                    val gradeFilter = mapOf("class_grade" to "eq.$grade")
+                    val chapterIds = fetchIds("chapters", gradeFilter)
+                    val materialIds = fetchIds("study_materials", gradeFilter)
+                    val paperIds = fetchIds("exam_papers", gradeFilter)
+                    val quizIds = fetchIds("quizzes", gradeFilter)
+
+                    (chapterIds + materialIds + paperIds).distinct().forEach { parentId ->
+                        syncHelper.deleteRemoteAttachmentsForParent(parentId)
+                    }
+                    quizIds.distinct().forEach { quizId ->
+                        supabase.deleteWhere("quiz_questions", mapOf("quiz_id" to "eq.$quizId"))
+                    }
+                    supabase.deleteWhere("exam_papers", gradeFilter)
+                    supabase.deleteWhere("quizzes", gradeFilter)
+                    supabase.deleteWhere("study_materials", gradeFilter)
+                    supabase.deleteWhere("chapters", gradeFilter)
+                    supabase.deleteWhere("subjects", gradeFilter)
+                }
                 supabase.deleteWhere("classes", mapOf("id" to "eq.$classId"))
                 syncHelper.markCloudSeedDone()
             }
             syncHelper.markLocalSeedDone()
-            dao.deleteClassById(classId)
+            if (grade != null) {
+                val removedParents = dao.deleteClassCascade(classId, grade)
+                removedParents.forEach { AttachmentMediaHelper.deleteParentMediaCache(appContext, it) }
+            } else {
+                dao.deleteClassById(classId)
+            }
+            cloudRefreshTrigger.tryEmit(Unit)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -670,9 +706,38 @@ class StudyHubRepository(
     }
 
     suspend fun deleteSubject(subjectId: String): Result<Unit> {
-        val res = deleteAdminRow("subjects", subjectId)
-        if (res.isSuccess) dao.deleteSubjectById(subjectId)
-        return res
+        if (subjectId.isBlank()) return Result.failure(IllegalArgumentException("Invalid subject ID"))
+        return try {
+            requireAdmin()
+            if (supabase.isConfigured()) {
+                val subjFilter = mapOf("subject_id" to "eq.$subjectId")
+                val chapterIds = fetchIds("chapters", subjFilter)
+                val materialIds = fetchIds("study_materials", subjFilter)
+                val paperIds = fetchIds("exam_papers", subjFilter)
+                val quizIds = fetchIds("quizzes", subjFilter)
+
+                (chapterIds + materialIds + paperIds).distinct().forEach { parentId ->
+                    syncHelper.deleteRemoteAttachmentsForParent(parentId)
+                }
+                quizIds.distinct().forEach { quizId ->
+                    supabase.deleteWhere("quiz_questions", mapOf("quiz_id" to "eq.$quizId"))
+                }
+                supabase.deleteWhere("exam_papers", subjFilter)
+                supabase.deleteWhere("quizzes", subjFilter)
+                supabase.deleteWhere("study_materials", subjFilter)
+                supabase.deleteWhere("chapters", subjFilter)
+                supabase.deleteWhere("subjects", mapOf("id" to "eq.$subjectId"))
+            }
+            val removedParents = dao.deleteSubjectCascade(subjectId)
+            removedParents.forEach { AttachmentMediaHelper.deleteParentMediaCache(appContext, it) }
+            cloudRefreshTrigger.tryEmit(Unit)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.DELETE, "subjects/$subjectId")
+            Result.failure(e)
+        }
     }
 
     suspend fun saveChapter(item: ChapterItem, isCreate: Boolean): Result<Unit> {
@@ -736,14 +801,34 @@ class StudyHubRepository(
     }
 
     suspend fun deleteChapter(chapterId: String): Result<Unit> {
-        val res = deleteAdminRow("chapters", chapterId)
-        if (res.isSuccess) {
-            syncHelper.deleteRemoteAttachmentsForParent(chapterId)
-            dao.deleteChapterById(chapterId)
-            dao.deleteAttachmentsForParent(chapterId)
-            AttachmentMediaHelper.deleteParentMediaCache(appContext, chapterId)
+        if (chapterId.isBlank()) return Result.failure(IllegalArgumentException("Invalid chapter ID"))
+        return try {
+            requireAdmin()
+            if (supabase.isConfigured()) {
+                val chapFilter = mapOf("chapter_id" to "eq.$chapterId")
+                val materialIds = fetchIds("study_materials", chapFilter)
+                val quizIds = fetchIds("quizzes", chapFilter)
+
+                (listOf(chapterId) + materialIds).distinct().forEach { parentId ->
+                    syncHelper.deleteRemoteAttachmentsForParent(parentId)
+                }
+                quizIds.distinct().forEach { quizId ->
+                    supabase.deleteWhere("quiz_questions", mapOf("quiz_id" to "eq.$quizId"))
+                }
+                supabase.deleteWhere("quizzes", chapFilter)
+                supabase.deleteWhere("study_materials", chapFilter)
+                supabase.deleteWhere("chapters", mapOf("id" to "eq.$chapterId"))
+            }
+            val removedParents = dao.deleteChapterCascade(chapterId)
+            removedParents.forEach { AttachmentMediaHelper.deleteParentMediaCache(appContext, it) }
+            cloudRefreshTrigger.tryEmit(Unit)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.DELETE, "chapters/$chapterId")
+            Result.failure(e)
         }
-        return res
     }
 
     suspend fun saveStudyMaterial(item: StudyMaterial, isCreate: Boolean): Result<Unit> {
@@ -1219,6 +1304,13 @@ class StudyHubRepository(
         } catch (e: Exception) {
             handleCloudError(e, OperationType.DELETE, "user_profiles/$targetUid")
             Result.failure(e)
+        }
+    }
+
+    private suspend fun fetchIds(table: String, filters: Map<String, String>): List<String> {
+        val arr = supabase.select(table, filters, selectCols = "id")
+        return (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.optString("id")?.takeIf { it.isNotBlank() }
         }
     }
 

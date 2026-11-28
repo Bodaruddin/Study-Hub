@@ -281,10 +281,15 @@ fun AdminShellScreen(
             }
         )
     }
+    val availableGrades = remember(classes) {
+        classes.map { it.grade }.distinct().sorted().ifEmpty { (6L..12L).toList() }
+    }
+
     if (showAddSubjectDialog || editingSubject != null) {
         val target = editingSubject
         AdminSubjectEditorDialog(
             initialSubject = target,
+            availableGrades = availableGrades,
             onDismiss = {
                 showAddSubjectDialog = false
                 editingSubject = null
@@ -302,6 +307,7 @@ fun AdminShellScreen(
             subjects = subjects,
             chapters = chapters,
             initialMaterial = targetMaterial,
+            availableGrades = availableGrades,
             onLoadAttachments = onLoadAttachments,
             onDismiss = {
                 showUploadMaterialDialog = false
@@ -343,6 +349,7 @@ fun AdminShellScreen(
             subjects = subjects,
             chapters = chapters,
             initialQuiz = targetQuiz,
+            availableGrades = availableGrades,
             onDismiss = {
                 showCreateQuizDialog = false
                 editingQuiz = null
@@ -477,6 +484,7 @@ fun AdminShellScreen(
                 when (activeModule) {
                     AdminModule.DASHBOARD -> AdminDashboardContent(
                         profile = profile,
+                        classes = classes,
                         subjects = subjects,
                         chapters = chapters,
                         materials = materials,
@@ -630,6 +638,7 @@ private data class AdminActivityEntry(
 @Composable
 private fun AdminDashboardContent(
     profile: UserProfile,
+    classes: List<SchoolClass>,
     subjects: List<SubjectItem>,
     chapters: List<ChapterItem>,
     materials: List<StudyMaterial>,
@@ -1096,10 +1105,10 @@ private fun AdminDashboardContent(
                     Spacer(modifier = Modifier.height(14.dp))
                     val zoneId = remember { ZoneId.systemDefault() }
                     val today = LocalDate.now(zoneId)
-                    val chartData = remember(analyticsRange, studentAccounts, materials, quizzes, examPapers, announcements) {
+                    val chartData = remember(analyticsRange, classes, studentAccounts, materials, quizzes, examPapers, announcements) {
                         when (analyticsRange) {
                             "By Class (6–12)" -> {
-                                val grades = (6L..12L).toList()
+                                val grades = classes.map { it.grade }.distinct().sorted().ifEmpty { (6L..12L).toList() }
                                 val xLabels = grades.map { "C$it" }
                                 val counts1 = grades.map { g -> studentAccounts.count { it.selectedClass == g } }
                                 val counts2 = grades.map { g ->

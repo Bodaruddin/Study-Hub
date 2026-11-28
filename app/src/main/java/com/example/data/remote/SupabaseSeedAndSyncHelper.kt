@@ -143,11 +143,24 @@ class SupabaseSeedAndSyncHelper(
                 )
             }
 
+            val hasAnyCloudContent = classes.isNotEmpty() ||
+                subjects.isNotEmpty() ||
+                chapters.isNotEmpty() ||
+                materials.isNotEmpty() ||
+                quizzes.isNotEmpty() ||
+                questions.isNotEmpty() ||
+                papers.isNotEmpty()
             val cloudInitialized = prefs.getBoolean(KEY_CLOUD_SEED_DONE, false) ||
-                classes.isNotEmpty() || subjects.isNotEmpty() || materials.isNotEmpty()
+                hasAnyCloudContent ||
+                runCatching {
+                    supabase.select("app_settings", selectCols = "id", limit = 1).length() > 0 ||
+                        supabase.select("announcements", selectCols = "id", limit = 1).length() > 0 ||
+                        (!isAdmin && supabase.select("classes", selectCols = "id", limit = 1).length() > 0)
+                }.getOrDefault(false)
 
             if (cloudInitialized) {
                 markCloudSeedDone()
+                markLocalSeedDone()
                 dao.replaceClasses(classes)
                 dao.replaceSubjects(subjects)
                 dao.replaceChapters(chapters)
@@ -275,7 +288,8 @@ class SupabaseSeedAndSyncHelper(
         return try {
             val existingClasses = supabase.select("classes", selectCols = "id", limit = 1)
             val existingSettings = supabase.select("app_settings", selectCols = "id", limit = 1)
-            if (existingClasses.length() > 0 || existingSettings.length() > 0) {
+            val existingSubjects = supabase.select("subjects", selectCols = "id", limit = 1)
+            if (existingClasses.length() > 0 || existingSettings.length() > 0 || existingSubjects.length() > 0) {
                 markCloudSeedDone()
                 return Result.success(Unit)
             }

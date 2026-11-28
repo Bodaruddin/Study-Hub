@@ -81,6 +81,7 @@ import com.example.R
 import com.example.data.model.AppSettings
 import com.example.data.model.MaterialType
 import com.example.data.model.ReadingProgressRecord
+import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.data.model.SyncStatus
@@ -102,6 +103,7 @@ import com.example.ui.theme.OutfitFontFamily
 @Composable
 fun StudentHomeScreen(
     profile: UserProfile,
+    availableClasses: List<SchoolClass> = emptyList(),
     subjects: List<SubjectItem>,
     materials: List<StudyMaterial>,
     downloadedIds: Set<String>,
@@ -261,7 +263,11 @@ fun StudentHomeScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Class ${profile.selectedClass}",
+                                            text = if (availableClasses.isNotEmpty()) {
+                                                "Class ${profile.selectedClass}"
+                                            } else {
+                                                "No Class"
+                                            },
                                             style = MaterialTheme.typography.labelMedium,
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold
@@ -278,14 +284,22 @@ fun StudentHomeScreen(
                                     expanded = classMenuOpen,
                                     onDismissRequest = { classMenuOpen = false }
                                 ) {
-                                    (6L..12L).forEach { grade ->
+                                    if (availableClasses.isEmpty()) {
                                         DropdownMenuItem(
-                                            text = { Text("Class $grade") },
-                                            onClick = {
-                                                classMenuOpen = false
-                                                onSelectClass(grade)
-                                            }
+                                            text = { Text("No published classes") },
+                                            enabled = false,
+                                            onClick = { classMenuOpen = false }
                                         )
+                                    } else {
+                                        availableClasses.sortedBy { it.grade }.forEach { schoolClass ->
+                                            DropdownMenuItem(
+                                                text = { Text(schoolClass.name) },
+                                                onClick = {
+                                                    classMenuOpen = false
+                                                    onSelectClass(schoolClass.grade)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }

@@ -41,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,7 @@ import com.example.data.model.AppSettings
 import com.example.data.model.ExamPaper
 import com.example.data.model.PaperCategory
 import com.example.data.model.ResolvedPaperAttachment
+import com.example.data.model.SchoolClass
 import com.example.ui.components.EthicalAdFreeUpgradeBanner
 import com.example.ui.components.PaperAttachmentGallery
 import com.example.ui.components.Tactile3DCard
@@ -73,6 +75,7 @@ import com.example.ui.theme.OutfitFontFamily
 @Composable
 fun ExamPapersScreen(
     selectedClass: Long,
+    availableClasses: List<SchoolClass> = emptyList(),
     examPapers: List<ExamPaper>,
     downloadedPaperIds: Set<String>,
     onToggleDownloadPaper: (ExamPaper) -> Unit,
@@ -89,14 +92,24 @@ fun ExamPapersScreen(
     var selectedSubjectFilter by remember { mutableStateOf("All") }
     var viewingPaper by remember { mutableStateOf<ExamPaper?>(null) }
 
+    LaunchedEffect(examPapers) {
+        if (viewingPaper != null && examPapers.none { it.id == viewingPaper?.id && it.published }) {
+            viewingPaper = null
+        }
+    }
+
     val categories = listOf(
         PaperCategory.PREVIOUS_YEAR,
         PaperCategory.MODEL_PAPER,
         PaperCategory.SAMPLE_PAPER
     )
-    val availableSubjects = listOf("All") + examPapers.map { it.subjectName }.distinct()
+    val availableSubjects = listOf("All") + examPapers
+        .filter { it.published && it.classGrade == selectedClass }
+        .map { it.subjectName }
+        .distinct()
     val filteredPapers = examPapers.filter { p ->
         p.published &&
+            selectedClass > 0L &&
             p.classGrade == selectedClass &&
             p.paperCategory == selectedCategory.key &&
             (selectedSubjectFilter == "All" || p.subjectName == selectedSubjectFilter)
@@ -179,14 +192,24 @@ fun ExamPapersScreen(
                     expanded = filterMenuOpen,
                     onDismissRequest = { filterMenuOpen = false }
                 ) {
-                    (6L..12L).forEach { grade ->
+                    if (availableClasses.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("Class $grade${if (grade == selectedClass) " ✓" else ""}") },
-                            onClick = {
-                                filterMenuOpen = false
-                                onSelectClass(grade)
-                            }
+                            text = { Text("No published classes") },
+                            enabled = false,
+                            onClick = { filterMenuOpen = false }
                         )
+                    } else {
+                        availableClasses.sortedBy { it.grade }.forEach { schoolClass ->
+                            val grade = schoolClass.grade
+                            DropdownMenuItem(
+                                text = { Text("${schoolClass.name}${if (grade == selectedClass) " ✓" else ""}") },
+                                onClick = {
+                                    filterMenuOpen = false
+                                    selectedSubjectFilter = "All"
+                                    onSelectClass(grade)
+                                }
+                            )
+                        }
                     }
                     availableSubjects.forEach { subj ->
                         DropdownMenuItem(

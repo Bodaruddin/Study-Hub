@@ -228,10 +228,19 @@ fun AdminClassEditorDialog(
 @Composable
 fun AdminSubjectEditorDialog(
     initialSubject: SubjectItem? = null,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onDismiss: () -> Unit,
     onSave: (SubjectItem) -> Unit
 ) {
-    var selectedGrade by remember(initialSubject?.id) { mutableLongStateOf(initialSubject?.classGrade ?: 7L) }
+    val gradeChoices = remember(availableGrades, initialSubject?.classGrade) {
+        (availableGrades + listOfNotNull(initialSubject?.classGrade))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
+    var selectedGrade by remember(initialSubject?.id) {
+        mutableLongStateOf(initialSubject?.classGrade ?: gradeChoices.firstOrNull() ?: 7L)
+    }
     var name by remember(initialSubject?.id) { mutableStateOf(initialSubject?.name ?: "") }
     var subtitle by remember(initialSubject?.id) {
         mutableStateOf(initialSubject?.subtitle?.ifBlank { "Notes • Summary • MCQs" } ?: "Notes • Summary • MCQs")
@@ -259,7 +268,7 @@ fun AdminSubjectEditorDialog(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -340,10 +349,19 @@ fun AdminQuizEditorDialog(
     subjects: List<SubjectItem>,
     chapters: List<ChapterItem>,
     initialQuiz: QuizItem? = null,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onDismiss: () -> Unit,
     onSave: (QuizItem, QuizQuestion?) -> Unit
 ) {
-    var selectedGrade by remember(initialQuiz?.id) { mutableLongStateOf(initialQuiz?.classGrade ?: 7L) }
+    val gradeChoices = remember(availableGrades, initialQuiz?.classGrade) {
+        (availableGrades + listOfNotNull(initialQuiz?.classGrade))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
+    var selectedGrade by remember(initialQuiz?.id) {
+        mutableLongStateOf(initialQuiz?.classGrade ?: gradeChoices.firstOrNull() ?: 7L)
+    }
     var subjectName by remember(initialQuiz?.id) {
         mutableStateOf(initialQuiz?.subjectName?.ifBlank { "English" } ?: "English")
     }
@@ -381,7 +399,7 @@ fun AdminQuizEditorDialog(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -770,9 +788,16 @@ fun AdminAnnouncementEditorDialog(
 fun AdminEditStudentDialog(
     student: UserProfile,
     canBlockOrDelete: Boolean,
+    availableGrades: List<Long> = (6L..12L).toList(),
     onDismiss: () -> Unit,
     onSave: (displayName: String, selectedClass: Long, subscriptionTier: String, blocked: Boolean) -> Unit
 ) {
+    val gradeChoices = remember(availableGrades, student.selectedClass) {
+        (availableGrades + student.selectedClass.coerceIn(6L, 12L))
+            .distinct()
+            .sorted()
+            .ifEmpty { (6L..12L).toList() }
+    }
     var displayName by remember(student.userId) { mutableStateOf(student.displayName) }
     var selectedClass by remember(student.userId) { mutableLongStateOf(student.selectedClass.coerceIn(6L, 12L)) }
     var subscriptionTier by remember(student.userId) {
@@ -805,7 +830,7 @@ fun AdminEditStudentDialog(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    (6L..12L).forEach { g ->
+                    gradeChoices.forEach { g ->
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))

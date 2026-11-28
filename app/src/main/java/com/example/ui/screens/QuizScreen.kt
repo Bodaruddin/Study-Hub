@@ -137,7 +137,7 @@ fun QuizScreen(
     var selectedMode by remember { mutableStateOf(QuizMode.PRACTICE) }
     var randomizeQuestions by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
-    val classQuizzes = quizzes.filter { it.published && (it.classGrade == selectedClass || selectedClass == 0L) }
+    val classQuizzes = quizzes.filter { it.published && selectedClass > 0L && it.classGrade == selectedClass }
 
     Column(
         modifier = modifier
@@ -160,7 +160,11 @@ fun QuizScreen(
                     fontSize = 22.sp
                 )
                 Text(
-                    text = "Class $selectedClass • Chapter & Subject Tests",
+                    text = if (selectedClass > 0L) {
+                        "Class $selectedClass • Chapter & Subject Tests"
+                    } else {
+                        "No published class selected"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

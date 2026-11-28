@@ -105,6 +105,8 @@ class StudyHubViewModel(
     val supabaseStatus: StateFlow<SupabaseConnectionStatus> = _supabaseStatus.asStateFlow()
 
     private val _subcollectionsSynced = MutableStateFlow(!repository.isSupabaseConfigured())
+    private val _initialCurriculumSynced = MutableStateFlow(!repository.isSupabaseConfigured())
+    private var lastCloudSyncMillis: Long = 0L
 
     private var timerJob: Job? = null
 
@@ -186,10 +188,26 @@ class StudyHubViewModel(
                     loadAdminUsers()
                 }
             }
-            repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+            repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
+            lastCloudSyncMillis = System.currentTimeMillis()
+            _initialCurriculumSynced.value = true
             val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
             if (subSync.isSuccess || !repository.isSupabaseConfigured()) {
                 _subcollectionsSynced.value = true
+            }
+        }
+        viewModelScope.launch {
+            combine(classes, _isAdminMode, _initialCurriculumSynced) { classList, adminMode, synced ->
+                Triple(classList, adminMode, synced)
+            }.collect { (classList, adminMode, synced) ->
+                if (!synced || adminMode) return@collect
+                val publishedGrades = classList.filter { it.published }.map { it.grade }.distinct().sorted()
+                if (publishedGrades.isNotEmpty() && _profile.value.selectedClass !in publishedGrades) {
+                    val current = _profile.value.selectedClass
+                    val fallback = publishedGrades.minBy { kotlin.math.abs(it - current) }
+                    _profile.update { it.copy(selectedClass = fallback) }
+                    repository.updateUserProfileFields(currentUserId, mapOf("selectedClass" to fallback))
+                }
             }
         }
         viewModelScope.launch {
@@ -199,7 +217,19 @@ class StudyHubViewModel(
                 }
                 .collect { remoteProfile ->
                     if (remoteProfile != null) {
-                        _profile.value = mergeComputedStatsIfReady(remoteProfile)
+                        val publishedGrades = classes.value.filter { it.published }.map { it.grade }.distinct().sorted()
+                        val resolvedProfile = if (!_isAdminMode.value &&
+                            _initialCurriculumSynced.value &&
+                            publishedGrades.isNotEmpty() &&
+                            remoteProfile.selectedClass !in publishedGrades
+                        ) {
+                            remoteProfile.copy(
+                                selectedClass = publishedGrades.minBy { kotlin.math.abs(it - remoteProfile.selectedClass) }
+                            )
+                        } else {
+                            remoteProfile
+                        }
+                        _profile.value = mergeComputedStatsIfReady(resolvedProfile)
                         if (!hasAutoRoutedAdmin && remoteProfile.role == "admin") {
                             hasAutoRoutedAdmin = true
                             _isAdminMode.value = true
@@ -275,16 +305,41 @@ class StudyHubViewModel(
             return
         }
         _isAdminMode.value = enabled
-        if (enabled) {
-            loadAdminUsers()
+        viewModelScope.launch {
+            repository.syncCurriculumFromCloud(enabled && isAuthorizedAdmin)
+            lastCloudSyncMillis = System.currentTimeMillis()
+            _initialCurriculumSynced.value = true
+            if (enabled) {
+                loadAdminUsers()
+            }
+        }
+    }
+
+    fun refreshOnResume(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCloudSyncMillis < 5_000L) return
+        lastCloudSyncMillis = now
+        viewModelScope.launch {
+            syncManager.flushPendingSync(currentUserId)
+            repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
+            _initialCurriculumSynced.value = true
+            if (_isAdminMode.value && isAuthorizedAdmin) {
+                loadAdminUsers()
+            }
         }
     }
 
     fun updateSelectedClass(grade: Long) {
         val clamped = grade.coerceIn(6L, 12L)
-        _profile.update { it.copy(selectedClass = clamped) }
+        val publishedGrades = classes.value.filter { it.published }.map { it.grade }.distinct().sorted()
+        val resolved = if (!_isAdminMode.value && publishedGrades.isNotEmpty() && clamped !in publishedGrades) {
+            publishedGrades.minBy { kotlin.math.abs(it - clamped) }
+        } else {
+            clamped
+        }
+        _profile.update { it.copy(selectedClass = resolved) }
         viewModelScope.launch {
-            repository.updateUserProfileFields(currentUserId, mapOf("selectedClass" to clamped))
+            repository.updateUserProfileFields(currentUserId, mapOf("selectedClass" to resolved))
         }
     }
 
@@ -362,12 +417,14 @@ class StudyHubViewModel(
     fun triggerManualSync() {
         viewModelScope.launch {
             val res = syncManager.flushPendingSync(currentUserId)
-            repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+            repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
+            lastCloudSyncMillis = System.currentTimeMillis()
+            _initialCurriculumSynced.value = true
             val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
             if (subSync.isSuccess || !repository.isSupabaseConfigured()) {
                 _subcollectionsSynced.value = true
             }
-            if (isAuthorizedAdmin) loadAdminUsers()
+            if (_isAdminMode.value && isAuthorizedAdmin) loadAdminUsers()
             res.onSuccess { count ->
                 _snackbarMessage.value = if (count > 0) "Synced $count offline record(s)" else "Everything is up to date"
             }.onFailure {

@@ -92,6 +92,7 @@ import com.example.data.model.ChapterItem
 import com.example.data.model.ExamPaper
 import com.example.data.model.QuizAttemptRecord
 import com.example.data.model.QuizQuestion
+import com.example.data.model.SchoolClass
 import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.data.model.UserProfile
@@ -108,6 +109,7 @@ import com.example.ui.theme.OutfitFontFamily
 @Composable
 fun ProfileScreen(
     profile: UserProfile,
+    availableClasses: List<SchoolClass> = emptyList(),
     isAuthorizedAdmin: Boolean,
     quizAttempts: List<QuizAttemptRecord>,
     onUpdateName: (String) -> Unit,
@@ -213,25 +215,41 @@ fun ProfileScreen(
                             }
                         )
                     }
-                    Text("Selected Class: Class ${profile.selectedClass}", style = MaterialTheme.typography.labelLarge)
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        (6L..12L).forEach { g ->
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { onSelectClass(g) },
-                                color = if (profile.selectedClass == g) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = "Class $g",
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    color = if (profile.selectedClass == g) Color.White else MaterialTheme.colorScheme.onSurface,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
+                    Text(
+                        text = if (availableClasses.isNotEmpty() && profile.selectedClass > 0L) {
+                            "Selected Class: Class ${profile.selectedClass}"
+                        } else {
+                            "Selected Class: None"
+                        },
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    if (availableClasses.isEmpty()) {
+                        Text(
+                            text = "No published classes available right now.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            availableClasses.sortedBy { it.grade }.forEach { schoolClass ->
+                                val g = schoolClass.grade
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSelectClass(g) },
+                                    color = if (profile.selectedClass == g) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        text = schoolClass.name,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        color = if (profile.selectedClass == g) Color.White else MaterialTheme.colorScheme.onSurface,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
                             }
                         }
                     }
@@ -412,7 +430,11 @@ fun ProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (isAuthorizedAdmin) "Admin • Class ${profile.selectedClass}" else "Student • Class ${profile.selectedClass}",
+                                    text = buildString {
+                                        append(if (isAuthorizedAdmin) "Admin" else "Student")
+                                        append(" • ")
+                                        append(if (profile.selectedClass > 0L) "Class ${profile.selectedClass}" else "No Class")
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.White,
                                     fontWeight = FontWeight.SemiBold

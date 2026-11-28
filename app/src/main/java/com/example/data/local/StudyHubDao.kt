@@ -24,21 +24,39 @@ interface StudyHubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSubjects(items: List<CachedSubjectEntity>)
 
+    @Query("SELECT * FROM cached_classes WHERE id = :id LIMIT 1")
+    suspend fun getClassById(id: String): CachedClassEntity?
+
     @Query("DELETE FROM cached_classes WHERE id = :id")
     suspend fun deleteClassById(id: String)
 
     @Query("DELETE FROM cached_subjects WHERE id = :id")
     suspend fun deleteSubjectById(id: String)
 
+    @Query("DELETE FROM cached_subjects WHERE classGrade = :grade")
+    suspend fun deleteSubjectsByClassGrade(grade: Long)
+
     // Chapters
     @Query("SELECT * FROM cached_chapters ORDER BY classGrade ASC, chapterNumber ASC")
     fun observeAllChapters(): Flow<List<CachedChapterEntity>>
+
+    @Query("SELECT * FROM cached_chapters WHERE classGrade = :grade")
+    suspend fun getChaptersByClassGrade(grade: Long): List<CachedChapterEntity>
+
+    @Query("SELECT * FROM cached_chapters WHERE subjectId = :subjectId")
+    suspend fun getChaptersBySubjectId(subjectId: String): List<CachedChapterEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChapters(items: List<CachedChapterEntity>)
 
     @Query("DELETE FROM cached_chapters WHERE id = :id")
     suspend fun deleteChapterById(id: String)
+
+    @Query("DELETE FROM cached_chapters WHERE classGrade = :grade")
+    suspend fun deleteChaptersByClassGrade(grade: Long)
+
+    @Query("DELETE FROM cached_chapters WHERE subjectId = :subjectId")
+    suspend fun deleteChaptersBySubjectId(subjectId: String)
 
     // Materials
     @Query("SELECT * FROM cached_materials ORDER BY classGrade ASC, title ASC")
@@ -53,8 +71,26 @@ interface StudyHubDao {
     @Query("UPDATE cached_materials SET downloadedOffline = :downloaded, downloadedAtMillis = :timestamp WHERE id = :materialId")
     suspend fun setMaterialDownloaded(materialId: String, downloaded: Boolean, timestamp: Long)
 
+    @Query("SELECT * FROM cached_materials WHERE classGrade = :grade")
+    suspend fun getMaterialsByClassGrade(grade: Long): List<CachedMaterialEntity>
+
+    @Query("SELECT * FROM cached_materials WHERE subjectId = :subjectId")
+    suspend fun getMaterialsBySubjectId(subjectId: String): List<CachedMaterialEntity>
+
+    @Query("SELECT * FROM cached_materials WHERE chapterId = :chapterId")
+    suspend fun getMaterialsByChapterId(chapterId: String): List<CachedMaterialEntity>
+
     @Query("DELETE FROM cached_materials WHERE id = :id")
     suspend fun deleteMaterialById(id: String)
+
+    @Query("DELETE FROM cached_materials WHERE classGrade = :grade")
+    suspend fun deleteMaterialsByClassGrade(grade: Long)
+
+    @Query("DELETE FROM cached_materials WHERE subjectId = :subjectId")
+    suspend fun deleteMaterialsBySubjectId(subjectId: String)
+
+    @Query("DELETE FROM cached_materials WHERE chapterId = :chapterId")
+    suspend fun deleteMaterialsByChapterId(chapterId: String)
 
     // Quizzes & Questions
     @Query("SELECT * FROM cached_quizzes ORDER BY classGrade ASC, title ASC")
@@ -75,11 +111,32 @@ interface StudyHubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertQuestions(items: List<CachedQuestionEntity>)
 
+    @Query("SELECT * FROM cached_quizzes WHERE classGrade = :grade")
+    suspend fun getQuizzesByClassGrade(grade: Long): List<CachedQuizEntity>
+
+    @Query("SELECT * FROM cached_quizzes WHERE subjectId = :subjectId")
+    suspend fun getQuizzesBySubjectId(subjectId: String): List<CachedQuizEntity>
+
+    @Query("SELECT * FROM cached_quizzes WHERE chapterId = :chapterId")
+    suspend fun getQuizzesByChapterId(chapterId: String): List<CachedQuizEntity>
+
     @Query("DELETE FROM cached_quizzes WHERE id = :id")
     suspend fun deleteQuizById(id: String)
 
+    @Query("DELETE FROM cached_quizzes WHERE classGrade = :grade")
+    suspend fun deleteQuizzesByClassGrade(grade: Long)
+
+    @Query("DELETE FROM cached_quizzes WHERE subjectId = :subjectId")
+    suspend fun deleteQuizzesBySubjectId(subjectId: String)
+
+    @Query("DELETE FROM cached_quizzes WHERE chapterId = :chapterId")
+    suspend fun deleteQuizzesByChapterId(chapterId: String)
+
     @Query("DELETE FROM cached_questions WHERE quizId = :quizId")
     suspend fun deleteQuestionsByQuizId(quizId: String)
+
+    @Query("DELETE FROM cached_questions WHERE quizId IN (:quizIds)")
+    suspend fun deleteQuestionsByQuizIds(quizIds: List<String>)
 
     @Query("DELETE FROM cached_questions WHERE id = :id")
     suspend fun deleteQuestionById(id: String)
@@ -94,8 +151,20 @@ interface StudyHubDao {
     @Query("UPDATE cached_exam_papers SET downloadedOffline = :downloaded WHERE id = :paperId")
     suspend fun setExamPaperDownloaded(paperId: String, downloaded: Boolean)
 
+    @Query("SELECT * FROM cached_exam_papers WHERE classGrade = :grade")
+    suspend fun getExamPapersByClassGrade(grade: Long): List<CachedExamPaperEntity>
+
+    @Query("SELECT * FROM cached_exam_papers WHERE subjectId = :subjectId")
+    suspend fun getExamPapersBySubjectId(subjectId: String): List<CachedExamPaperEntity>
+
     @Query("DELETE FROM cached_exam_papers WHERE id = :id")
     suspend fun deleteExamPaperById(id: String)
+
+    @Query("DELETE FROM cached_exam_papers WHERE classGrade = :grade")
+    suspend fun deleteExamPapersByClassGrade(grade: Long)
+
+    @Query("DELETE FROM cached_exam_papers WHERE subjectId = :subjectId")
+    suspend fun deleteExamPapersBySubjectId(subjectId: String)
 
     // Paper Attachments
     @Query("SELECT * FROM cached_paper_attachments WHERE parentId = :parentId ORDER BY sortOrder ASC")
@@ -110,8 +179,62 @@ interface StudyHubDao {
     @Query("DELETE FROM cached_paper_attachments WHERE parentId = :parentId")
     suspend fun deleteAttachmentsForParent(parentId: String)
 
+    @Query("DELETE FROM cached_paper_attachments WHERE parentId IN (:parentIds)")
+    suspend fun deleteAttachmentsForParents(parentIds: List<String>)
+
     @Query("DELETE FROM cached_paper_attachments WHERE groupId = :groupId")
     suspend fun deleteAttachmentGroup(groupId: String)
+
+    @Transaction
+    suspend fun deleteClassCascade(classId: String, grade: Long): List<String> {
+        val chapterIds = getChaptersByClassGrade(grade).map { it.id }
+        val materialIds = getMaterialsByClassGrade(grade).map { it.id }
+        val paperIds = getExamPapersByClassGrade(grade).map { it.id }
+        val quizIds = getQuizzesByClassGrade(grade).map { it.id }
+        val attachmentParents = (chapterIds + materialIds + paperIds).distinct()
+
+        attachmentParents.chunked(200).forEach { deleteAttachmentsForParents(it) }
+        quizIds.chunked(200).forEach { deleteQuestionsByQuizIds(it) }
+        deleteExamPapersByClassGrade(grade)
+        deleteQuizzesByClassGrade(grade)
+        deleteMaterialsByClassGrade(grade)
+        deleteChaptersByClassGrade(grade)
+        deleteSubjectsByClassGrade(grade)
+        deleteClassById(classId)
+        return attachmentParents
+    }
+
+    @Transaction
+    suspend fun deleteSubjectCascade(subjectId: String): List<String> {
+        val chapterIds = getChaptersBySubjectId(subjectId).map { it.id }
+        val materialIds = getMaterialsBySubjectId(subjectId).map { it.id }
+        val paperIds = getExamPapersBySubjectId(subjectId).map { it.id }
+        val quizIds = getQuizzesBySubjectId(subjectId).map { it.id }
+        val attachmentParents = (chapterIds + materialIds + paperIds).distinct()
+
+        attachmentParents.chunked(200).forEach { deleteAttachmentsForParents(it) }
+        quizIds.chunked(200).forEach { deleteQuestionsByQuizIds(it) }
+        deleteExamPapersBySubjectId(subjectId)
+        deleteQuizzesBySubjectId(subjectId)
+        deleteMaterialsBySubjectId(subjectId)
+        deleteChaptersBySubjectId(subjectId)
+        deleteSubjectById(subjectId)
+        return attachmentParents
+    }
+
+    @Transaction
+    suspend fun deleteChapterCascade(chapterId: String): List<String> {
+        val materialIds = getMaterialsByChapterId(chapterId).map { it.id }
+        val quizIds = getQuizzesByChapterId(chapterId).map { it.id }
+        val attachmentParents = (listOf(chapterId) + materialIds).distinct()
+
+        attachmentParents.chunked(200).forEach { deleteAttachmentsForParents(it) }
+        quizIds.chunked(200).forEach { deleteQuestionsByQuizIds(it) }
+        deleteQuizzesByChapterId(chapterId)
+        deleteMaterialsByChapterId(chapterId)
+        deleteChapterById(chapterId)
+        return attachmentParents
+    }
 
     // User Bookmarks
     @Query("SELECT * FROM cached_bookmarks WHERE userId = :userId ORDER BY savedAtMillis DESC")
