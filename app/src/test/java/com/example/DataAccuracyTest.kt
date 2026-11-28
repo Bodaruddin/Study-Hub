@@ -132,4 +132,23 @@ class DataAccuracyTest {
             db.close()
         }
     }
+
+    @Test
+    fun `userProfileFromJson normalizes role, subscriptionTier, and falls back to user_id when id is blank`() {
+        val json = JSONObject()
+            .put("id", "")
+            .put("user_id", "stu_42")
+            .put("display_name", "")
+            .put("email", " student@example.com ")
+            .put("role", "Student ")
+            .put("subscription_tier", "PREMIUM")
+
+        val profile = SupabaseMappers.userProfileFromJson(json)
+        assertEquals("stu_42", profile.id)
+        assertEquals("stu_42", profile.userId)
+        assertEquals("Student", profile.displayName)
+        assertEquals("student@example.com", profile.email)
+        assertEquals("student", profile.role)
+        assertEquals("premium", profile.subscriptionTier)
+    }
 }

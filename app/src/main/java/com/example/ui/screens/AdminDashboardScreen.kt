@@ -187,6 +187,8 @@ fun AdminShellScreen(
     examPapers: List<ExamPaper>,
     announcements: List<AnnouncementItem>,
     adminUsers: List<UserProfile>,
+    isLoadingAdminUsers: Boolean,
+    adminUsersError: String?,
     appSettings: AppSettings,
     syncStatus: SyncStatus,
     pendingSyncCount: Int,
@@ -216,7 +218,7 @@ fun AdminShellScreen(
     onSaveAnnouncement: (AnnouncementItem) -> Unit,
     onTogglePublishAnnouncement: (AnnouncementItem) -> Unit,
     onDeleteAnnouncement: (String) -> Unit,
-    onRefreshStudents: () -> Unit,
+    onRefreshStudents: (Boolean) -> Unit,
     onUpdateStudent: (UserProfile, String, Long, String, Boolean) -> Unit,
     onSetStudentBlocked: (UserProfile, Boolean) -> Unit,
     onDeleteStudent: (UserProfile) -> Unit,
@@ -253,16 +255,15 @@ fun AdminShellScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(activeModule, supabaseStatus.configured) {
-        if (supabaseStatus.configured && activeModule in setOf(
+        if (activeModule == AdminModule.STUDENTS || (supabaseStatus.configured && activeModule in setOf(
                 AdminModule.DASHBOARD,
                 AdminModule.CLASSES,
-                AdminModule.STUDENTS,
                 AdminModule.ANALYTICS,
                 AdminModule.DATABASE,
                 AdminModule.SUPPORT
-            )
+            ))
         ) {
-            onRefreshStudents()
+            onRefreshStudents(false)
         }
     }
 
@@ -523,7 +524,7 @@ fun AdminShellScreen(
                             showAnnouncementDialog = true
                         },
                         onOpenManageStudents = {
-                            onRefreshStudents()
+                            onRefreshStudents(false)
                             activeModule = AdminModule.STUDENTS
                         },
                         onOpenManageMaterials = { activeModule = AdminModule.MATERIALS },
@@ -546,6 +547,8 @@ fun AdminShellScreen(
                         examPapers = examPapers,
                         announcements = announcements,
                         adminUsers = adminUsers,
+                        isLoadingAdminUsers = isLoadingAdminUsers,
+                        adminUsersError = adminUsersError,
                         appSettings = appSettings,
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
@@ -557,7 +560,7 @@ fun AdminShellScreen(
                         },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onNavigateModule = { target ->
-                            if (target == AdminModule.STUDENTS) onRefreshStudents()
+                            if (target == AdminModule.STUDENTS) onRefreshStudents(false)
                             activeModule = target
                         },
                         onOpenAddClass = {
@@ -758,25 +761,6 @@ private fun AdminDashboardContent(
                                     contentDescription = "System alerts",
                                     tint = Color.White,
                                     modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        if (announcements.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 4.dp, end = 4.dp)
-                                    .size(17.dp)
-                                    .clip(CircleShape)
-                                    .background(DangerRed)
-                                    .border(1.2.dp, Color.White, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = announcements.size.coerceAtMost(9).toString(),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }

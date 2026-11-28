@@ -157,14 +157,16 @@ class StudyHubRepository(
             if (rows.length() > 0) {
                 val existing = SupabaseMappers.userProfileFromJson(rows.getJSONObject(0))
                 val promoted = if (isVerifiedAdminEmail(email) && existing.role != "admin") {
-                    supabase.updateWhere(
-                        table = "user_profiles",
-                        filters = mapOf("id" to "eq.$uid"),
-                        bodyJson = JSONObject().apply {
-                            put("role", "admin")
-                            put("updated_at", SupabaseMappers.nowIso())
-                        }
-                    )
+                    runCatching {
+                        supabase.updateWhere(
+                            table = "user_profiles",
+                            filters = mapOf("id" to "eq.$uid"),
+                            bodyJson = JSONObject().apply {
+                                put("role", "admin")
+                                put("updated_at", SupabaseMappers.nowIso())
+                            }
+                        )
+                    }
                     existing.copy(role = "admin")
                 } else {
                     existing
@@ -172,7 +174,7 @@ class StudyHubRepository(
                 verifiedAdminUid = if (promoted.role == "admin" || isVerifiedAdminEmail(email)) uid else null
                 Result.success(promoted)
             } else {
-                supabase.upsertOne("user_profiles", defaultProfile.toSupabaseJson(uid))
+                upsertProfileWithSchemaFallback(uid, defaultProfile)
                 verifiedAdminUid = if (defaultProfile.role == "admin") uid else null
                 Result.success(defaultProfile)
             }
@@ -181,6 +183,31 @@ class StudyHubRepository(
         } catch (e: Exception) {
             handleCloudError(e, OperationType.GET, path)
             Result.failure(e)
+        }
+    }
+
+    private suspend fun upsertProfileWithSchemaFallback(uid: String, profile: UserProfile) {
+        val fullPayload = profile.toSupabaseJson(uid)
+        try {
+            supabase.upsertOne("user_profiles", fullPayload)
+        } catch (e: SupabaseApiException) {
+            if (e.statusCode != 400) throw e
+            val withoutBlocked = JSONObject(fullPayload.toString()).apply { remove("blocked") }
+            try {
+                supabase.upsertOne("user_profiles", withoutBlocked)
+            } catch (e2: SupabaseApiException) {
+                if (e2.statusCode != 400) throw e2
+                val minimalPayload = JSONObject().apply {
+                    put("id", uid)
+                    put("user_id", uid)
+                    put("display_name", profile.displayName.take(80).ifBlank { "Student" })
+                    put("email", profile.email.take(160))
+                    put("selected_class", profile.selectedClass.coerceIn(6L, 12L))
+                    put("role", if (profile.role == "admin") "admin" else "student")
+                    put("subscription_tier", if (profile.subscriptionTier == "premium") "premium" else "free")
+                }
+                supabase.upsertOne("user_profiles", minimalPayload)
+            }
         }
     }
 
@@ -1187,10 +1214,26 @@ class StudyHubRepository(
     suspend fun fetchAllUsersForAdmin(): Result<List<UserProfile>> {
         return try {
             requireAdmin()
-            if (!supabase.isConfigured()) return Result.success(emptyList())
-            val arr = supabase.select("user_profiles", order = "created_at.desc")
-            val list = (0 until arr.length()).map { i ->
-                SupabaseMappers.userProfileFromJson(arr.getJSONObject(i))
+            if (!supabase.isConfigured()) {
+                return Result.failure(
+                    IllegalStateException("Supabase is not configured. Open Manage Database → Setup Supabase Database.")
+                )
+            }
+            val arr = try {
+                supabase.select("user_profiles", order = "created_at.desc")
+            } catch (e: SupabaseApiException) {
+                if (e.statusCode == 400) {
+                    supabase.select("user_profiles")
+                } else {
+                    throw e
+                }
+            }
+            val list = (0 until arr.length()).mapNotNull { i ->
+                arr.optJSONObject(i)?.let { obj ->
+                    runCatching { SupabaseMappers.userProfileFromJson(obj) }.getOrNull()
+                }?.takeIf { it.id.isNotBlank() || it.userId.isNotBlank() }
+            }.sortedByDescending { u ->
+                SupabaseMappers.parseIsoToMillisOrNull(u.createdAt ?: u.updatedAt) ?: 0L
             }
             Result.success(list)
         } catch (e: CancellationException) {

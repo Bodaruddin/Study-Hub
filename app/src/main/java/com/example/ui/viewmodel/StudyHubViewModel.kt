@@ -24,6 +24,7 @@ import com.example.data.model.UserStatsCalculator
 import com.example.data.remote.OfflineSyncManager
 import com.example.data.remote.SeedCurriculumData
 import com.example.data.remote.StudyHubRepository
+import com.example.data.remote.SupabaseApiException
 import com.example.data.remote.SupabaseConnectionStatus
 import com.example.data.remote.SupabaseTestResult
 import kotlinx.coroutines.CancellationException
@@ -95,6 +96,12 @@ class StudyHubViewModel(
     private val _adminUsers = MutableStateFlow<List<UserProfile>>(emptyList())
     val adminUsers: StateFlow<List<UserProfile>> = _adminUsers.asStateFlow()
 
+    private val _isLoadingAdminUsers = MutableStateFlow(false)
+    val isLoadingAdminUsers: StateFlow<Boolean> = _isLoadingAdminUsers.asStateFlow()
+
+    private val _adminUsersError = MutableStateFlow<String?>(null)
+    val adminUsersError: StateFlow<String?> = _adminUsersError.asStateFlow()
+
     private val _activeQuiz = MutableStateFlow<ActiveQuizState?>(null)
     val activeQuiz: StateFlow<ActiveQuizState?> = _activeQuiz.asStateFlow()
 
@@ -106,6 +113,7 @@ class StudyHubViewModel(
 
     private val _subcollectionsSynced = MutableStateFlow(!repository.isSupabaseConfigured())
     private val _initialCurriculumSynced = MutableStateFlow(!repository.isSupabaseConfigured())
+    private var profileSyncedToCloud: Boolean = false
     private var lastCloudSyncMillis: Long = 0L
 
     private var timerJob: Job? = null
@@ -178,15 +186,24 @@ class StudyHubViewModel(
             syncManager.flushPendingSync(currentUserId)
             val ensured = repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
             ensured.onSuccess { p ->
+                if (repository.isSupabaseConfigured()) {
+                    profileSyncedToCloud = true
+                }
                 _profile.value = mergeComputedStatsIfReady(p)
                 if (p.role == "admin" || repository.isVerifiedAdminEmail(currentUserEmail)) {
                     if (!hasAutoRoutedAdmin) {
                         hasAutoRoutedAdmin = true
                         _isAdminMode.value = true
                     }
-                    repository.seedCurriculumToCloudIfEmpty()
-                    loadAdminUsers()
                 }
+            }.onFailure { err ->
+                if (isAuthorizedAdmin) {
+                    _adminUsersError.value = formatAdminUsersError(err)
+                }
+            }
+            if (isAuthorizedAdmin) {
+                repository.seedCurriculumToCloudIfEmpty()
+                loadAdminUsers(showFeedback = false)
             }
             repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
             lastCloudSyncMillis = System.currentTimeMillis()
@@ -306,11 +323,15 @@ class StudyHubViewModel(
         }
         _isAdminMode.value = enabled
         viewModelScope.launch {
+            if (repository.isSupabaseConfigured() && !profileSyncedToCloud) {
+                repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                    .onSuccess { profileSyncedToCloud = true }
+            }
             repository.syncCurriculumFromCloud(enabled && isAuthorizedAdmin)
             lastCloudSyncMillis = System.currentTimeMillis()
             _initialCurriculumSynced.value = true
             if (enabled) {
-                loadAdminUsers()
+                loadAdminUsers(showFeedback = false)
             }
         }
     }
@@ -320,11 +341,18 @@ class StudyHubViewModel(
         if (!force && now - lastCloudSyncMillis < 5_000L) return
         lastCloudSyncMillis = now
         viewModelScope.launch {
+            if (repository.isSupabaseConfigured() && !profileSyncedToCloud) {
+                repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                    .onSuccess { p ->
+                        profileSyncedToCloud = true
+                        _profile.value = mergeComputedStatsIfReady(p)
+                    }
+            }
             syncManager.flushPendingSync(currentUserId)
             repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
             _initialCurriculumSynced.value = true
             if (_isAdminMode.value && isAuthorizedAdmin) {
-                loadAdminUsers()
+                loadAdminUsers(showFeedback = false)
             }
         }
     }
@@ -416,6 +444,10 @@ class StudyHubViewModel(
 
     fun triggerManualSync() {
         viewModelScope.launch {
+            if (repository.isSupabaseConfigured() && !profileSyncedToCloud) {
+                repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                    .onSuccess { profileSyncedToCloud = true }
+            }
             val res = syncManager.flushPendingSync(currentUserId)
             repository.syncCurriculumFromCloud(_isAdminMode.value && isAuthorizedAdmin)
             lastCloudSyncMillis = System.currentTimeMillis()
@@ -424,7 +456,7 @@ class StudyHubViewModel(
             if (subSync.isSuccess || !repository.isSupabaseConfigured()) {
                 _subcollectionsSynced.value = true
             }
-            if (_isAdminMode.value && isAuthorizedAdmin) loadAdminUsers()
+            if (_isAdminMode.value && isAuthorizedAdmin) loadAdminUsers(showFeedback = false)
             res.onSuccess { count ->
                 _snackbarMessage.value = if (count > 0) "Synced $count offline record(s)" else "Everything is up to date"
             }.onFailure {
@@ -589,11 +621,69 @@ class StudyHubViewModel(
     }
 
     // Admin Management Operations
-    fun loadAdminUsers() {
+    fun loadAdminUsers(showFeedback: Boolean = false) {
         if (!isAuthorizedAdmin) return
-        viewModelScope.launch {
-            repository.fetchAllUsersForAdmin().onSuccess { _adminUsers.value = it }
+        if (!repository.isSupabaseConfigured()) {
+            _adminUsers.value = emptyList()
+            val msg = "Supabase is not configured. Open Manage Database → Setup Supabase Database."
+            _adminUsersError.value = msg
+            if (showFeedback) _snackbarMessage.value = msg
+            return
         }
+        viewModelScope.launch {
+            _isLoadingAdminUsers.value = true
+            _adminUsersError.value = null
+            var ensureErr: String? = null
+            try {
+                if (!profileSyncedToCloud) {
+                    repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                        .onSuccess {
+                            profileSyncedToCloud = true
+                        }
+                        .onFailure { err ->
+                            ensureErr = formatAdminUsersError(err)
+                        }
+                }
+                repository.fetchAllUsersForAdmin()
+                    .onSuccess { users ->
+                        _adminUsers.value = users
+                        val diagnostic = when {
+                            users.isNotEmpty() -> null
+                            ensureErr != null -> ensureErr
+                            profileSyncedToCloud ->
+                                "Supabase returned 0 rows from user_profiles. Disable Row Level Security (RLS) or add SELECT grants in Manage Database → Setup Supabase."
+                            else -> null
+                        }
+                        _adminUsersError.value = diagnostic
+                        if (showFeedback) {
+                            _snackbarMessage.value = when {
+                                users.isNotEmpty() -> "Synced ${users.size} user(s)"
+                                diagnostic != null -> diagnostic
+                                else -> "No registered users found in Supabase yet"
+                            }
+                        }
+                    }
+                    .onFailure { err ->
+                        val msg = formatAdminUsersError(err)
+                        _adminUsersError.value = msg
+                        if (showFeedback) _snackbarMessage.value = msg
+                    }
+            } finally {
+                _isLoadingAdminUsers.value = false
+            }
+        }
+    }
+
+    private fun formatAdminUsersError(err: Throwable): String {
+        if (err is SupabaseApiException) {
+            return when (err.statusCode) {
+                401, 403 -> "Supabase denied access to user_profiles (HTTP ${err.statusCode}). Run the SQL grants & disable-RLS script in Manage Database → Setup Supabase."
+                404 -> "Table user_profiles is missing in Supabase (404). Run the SQL schema in Manage Database → Setup Supabase."
+                400 -> "user_profiles schema mismatch (400). Re-run the latest SQL schema in Manage Database → Setup Supabase."
+                else -> err.message ?: "Supabase error (${err.statusCode}) while syncing students."
+            }
+        }
+        return err.message ?: "Unable to sync students. Check your connection."
     }
 
     fun saveSchoolClass(item: SchoolClass, isCreate: Boolean) {
@@ -996,12 +1086,14 @@ class StudyHubViewModel(
         _supabaseStatus.value = repository.getSupabaseConnectionStatus()
         result.onSuccess { test ->
             if (test.connected && test.schemaReady) {
+                profileSyncedToCloud = false
                 repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
+                    .onSuccess { profileSyncedToCloud = true }
                 syncManager.flushPendingSync(currentUserId)
                 repository.syncCurriculumFromCloud(isAuthorizedAdmin)
                 val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
                 if (subSync.isSuccess) _subcollectionsSynced.value = true
-                loadAdminUsers()
+                loadAdminUsers(showFeedback = false)
                 _snackbarMessage.value = "Supabase connected and synced!"
             } else {
                 _snackbarMessage.value = "Supabase credentials saved"
@@ -1016,6 +1108,13 @@ class StudyHubViewModel(
         runCatching { repository.clearManualSupabaseConfig() }
             .onSuccess { status ->
                 _supabaseStatus.value = status
+                profileSyncedToCloud = false
+                if (!status.configured) {
+                    _adminUsers.value = emptyList()
+                    _adminUsersError.value = "Supabase is not configured. Open Manage Database → Setup Supabase Database."
+                } else {
+                    loadAdminUsers(showFeedback = false)
+                }
                 _snackbarMessage.value = "Manual Supabase configuration cleared"
             }
             .onFailure { err ->

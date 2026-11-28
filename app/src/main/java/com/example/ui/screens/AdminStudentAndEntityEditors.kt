@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,11 +34,15 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +77,7 @@ import com.example.data.model.QuizQuestion
 import com.example.data.model.SchoolClass
 import com.example.data.model.SubjectItem
 import com.example.data.model.UserProfile
+import com.example.data.remote.SupabaseConnectionStatus
 import com.example.ui.components.Tactile3DCard
 import com.example.ui.theme.BlueEnd
 import com.example.ui.theme.BlueStart
@@ -899,11 +904,15 @@ fun AdminEditStudentDialog(
 fun LazyListScope.adminManageStudentsItems(
     adminUsers: List<UserProfile>,
     currentAdminUid: String,
+    isLoadingUsers: Boolean,
+    usersError: String?,
+    supabaseStatus: SupabaseConnectionStatus,
     searchQuery: String,
     filterMode: String,
     onSearchChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onRefreshStudents: () -> Unit,
+    onOpenSupabaseSetup: () -> Unit,
     onEditStudent: (UserProfile) -> Unit,
     onRequestBlockToggle: (UserProfile) -> Unit,
     onRequestDeleteStudent: (UserProfile) -> Unit
@@ -973,12 +982,30 @@ fun LazyListScope.adminManageStudentsItems(
                     }
                     IconButton(
                         onClick = onRefreshStudents,
+                        enabled = !isLoadingUsers,
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("refresh_students_btn")
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh students", tint = Color.White)
+                        if (isLoadingUsers) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh students", tint = Color.White)
+                        }
                     }
+                }
+                if (isLoadingUsers) {
+                    LinearProgressIndicator(
+                        color = Color.White,
+                        trackColor = Color.White.copy(alpha = 0.2f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StudentSummaryPill("Students", "$totalStudents", Modifier.weight(1f))
@@ -1046,7 +1073,66 @@ fun LazyListScope.adminManageStudentsItems(
         }
     }
 
-    if (filtered.isEmpty()) {
+    if (!usersError.isNullOrBlank()) {
+        item {
+            Tactile3DCard(
+                faceBrush = Brush.linearGradient(
+                    listOf(Color(0xFF4C1D24), Color(0xFF2B1220))
+                ),
+                depthColor = Color(0xFF1A0A10),
+                shadowColor = DangerRed,
+                highlightBorderColor = DangerRed.copy(alpha = 0.55f),
+                borderEndColor = NavyCardBorder,
+                cornerRadius = 18.dp,
+                depthHeight = 4.dp,
+                floatingLift = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("students_sync_error_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.Warning, contentDescription = null, tint = Color(0xFFFFB4B4))
+                        Text(
+                            text = "Unable to sync students from Supabase",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                    Text(
+                        text = usersError,
+                        color = Color(0xFFFFD6D6),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = onRefreshStudents,
+                            enabled = !isLoadingUsers,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Retry", color = Color.White, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = onOpenSupabaseSetup,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.Storage, contentDescription = null, tint = Color(0xFFC5A6FF), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Setup SQL", color = Color(0xFFC5A6FF), maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+    } else if (filtered.isEmpty() && !isLoadingUsers) {
         item {
             Tactile3DCard(
                 faceBrush = Brush.linearGradient(
@@ -1065,16 +1151,22 @@ fun LazyListScope.adminManageStudentsItems(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = if (adminUsers.isEmpty()) "No registered users synced yet" else "No matching students",
                         color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Tap Refresh after students sign in or verify Supabase setup.",
+                        text = when {
+                            adminUsers.isNotEmpty() -> "Try clearing your search or switching the filter chip above."
+                            supabaseStatus.hasManualOverride ->
+                                "Manual Admin Setup only saves credentials on this device. To sync students signing in on other devices, add SUPABASE_URL and SUPABASE_ANON_KEY in AI Studio Secrets, or sign in as a student on this device and tap Refresh."
+                            else ->
+                                "Tap Refresh after students sign in, or check Manage Database → Setup Supabase if RLS is blocking user_profiles."
+                        },
                         color = Color(0xFF9AA5D1),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center
@@ -1084,7 +1176,7 @@ fun LazyListScope.adminManageStudentsItems(
         }
     }
 
-    items(filtered, key = { it.id.ifBlank { it.userId } }) { u ->
+    itemsIndexed(filtered, key = { idx, item -> item.id.ifBlank { item.userId }.ifBlank { "user_$idx" } }) { _, u ->
         val uid = u.id.ifBlank { u.userId }
         val isAdminUser = u.role == "admin" || uid == currentAdminUid
         val canBlockOrDelete = !isAdminUser

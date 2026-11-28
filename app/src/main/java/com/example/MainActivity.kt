@@ -205,6 +205,8 @@ private fun StudyHubApp() {
         val announcements by viewModel.announcements.collectAsStateWithLifecycle()
         val appSettings by viewModel.appSettings.collectAsStateWithLifecycle()
         val adminUsers by viewModel.adminUsers.collectAsStateWithLifecycle()
+        val isLoadingAdminUsers by viewModel.isLoadingAdminUsers.collectAsStateWithLifecycle()
+        val adminUsersError by viewModel.adminUsersError.collectAsStateWithLifecycle()
         val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
         val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
         val isDatabaseBusy by viewModel.isDatabaseBusy.collectAsStateWithLifecycle()
@@ -259,6 +261,8 @@ private fun StudyHubApp() {
                         examPapers = examPapers,
                         announcements = announcements,
                         adminUsers = adminUsers,
+                        isLoadingAdminUsers = isLoadingAdminUsers,
+                        adminUsersError = adminUsersError,
                         appSettings = appSettings,
                         syncStatus = syncStatus,
                         pendingSyncCount = pendingSyncCount,
@@ -288,7 +292,7 @@ private fun StudyHubApp() {
                         onSaveAnnouncement = viewModel::saveAnnouncement,
                         onTogglePublishAnnouncement = viewModel::toggleAnnouncementPublish,
                         onDeleteAnnouncement = viewModel::deleteAnnouncement,
-                        onRefreshStudents = viewModel::loadAdminUsers,
+                        onRefreshStudents = { showFeedback -> viewModel.loadAdminUsers(showFeedback) },
                         onUpdateStudent = viewModel::adminUpdateStudent,
                         onSetStudentBlocked = viewModel::adminSetStudentBlocked,
                         onDeleteStudent = viewModel::adminDeleteStudent,

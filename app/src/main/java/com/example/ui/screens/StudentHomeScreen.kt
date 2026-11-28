@@ -392,25 +392,6 @@ fun StudentHomeScreen(
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
-                                if (announcementCount > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(16.dp)
-                                            .shadow(3.dp, CircleShape)
-                                            .clip(CircleShape)
-                                            .background(DangerRed)
-                                            .border(1.dp, Color.White, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = announcementCount.coerceAtMost(9).toString(),
-                                            color = Color.White,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
                             }
                         }
                     }

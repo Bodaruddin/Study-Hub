@@ -82,27 +82,33 @@ object SupabaseMappers {
         put("updated_at", nowIso())
     }
 
-    fun userProfileFromJson(j: JSONObject): UserProfile = UserProfile(
-        id = j.str("id"),
-        userId = j.str("user_id", j.str("id")),
-        displayName = j.str("display_name", "Student"),
-        email = j.str("email"),
-        selectedClass = j.lng("selected_class", 7L),
-        role = j.str("role", "student"),
-        subscriptionTier = j.str("subscription_tier", "free"),
-        avgScore = j.lng("avg_score", 0L),
-        dayStreak = j.lng("day_streak", 0L),
-        points = j.lng("points", 0L),
-        dailyGoalCount = j.lng("daily_goal_count", 5L),
-        dailyCompletedCount = j.lng("daily_completed_count", 0L),
-        darkThemeEnabled = j.bool("dark_theme_enabled", false),
-        notificationsEnabled = j.bool("notifications_enabled", true),
-        examRemindersEnabled = j.bool("exam_reminders_enabled", true),
-        newMaterialsEnabled = j.bool("new_materials_enabled", true),
-        blocked = j.bool("blocked", false),
-        createdAt = j.strNullable("created_at"),
-        updatedAt = j.strNullable("updated_at")
-    )
+    fun userProfileFromJson(j: JSONObject): UserProfile {
+        val rawId = j.str("id").trim()
+        val rawUserId = j.str("user_id", rawId).trim()
+        val resolvedId = rawId.ifBlank { rawUserId }
+        val resolvedUserId = rawUserId.ifBlank { resolvedId }
+        return UserProfile(
+            id = resolvedId,
+            userId = resolvedUserId,
+            displayName = j.str("display_name", "Student").ifBlank { "Student" },
+            email = j.str("email").trim(),
+            selectedClass = j.lng("selected_class", 7L),
+            role = j.str("role", "student").trim().lowercase().ifBlank { "student" },
+            subscriptionTier = j.str("subscription_tier", "free").trim().lowercase().ifBlank { "free" },
+            avgScore = j.lng("avg_score", 0L),
+            dayStreak = j.lng("day_streak", 0L),
+            points = j.lng("points", 0L),
+            dailyGoalCount = j.lng("daily_goal_count", 5L),
+            dailyCompletedCount = j.lng("daily_completed_count", 0L),
+            darkThemeEnabled = j.bool("dark_theme_enabled", false),
+            notificationsEnabled = j.bool("notifications_enabled", true),
+            examRemindersEnabled = j.bool("exam_reminders_enabled", true),
+            newMaterialsEnabled = j.bool("new_materials_enabled", true),
+            blocked = j.bool("blocked", false),
+            createdAt = j.strNullable("created_at"),
+            updatedAt = j.strNullable("updated_at")
+        )
+    }
 
     fun userProfilePatchToSnakeCase(fields: Map<String, Any>): JSONObject = JSONObject().apply {
         fields.forEach { (key, value) ->

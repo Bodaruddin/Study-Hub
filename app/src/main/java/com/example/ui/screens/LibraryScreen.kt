@@ -355,65 +355,6 @@ fun LibraryScreen(
                 }
             }
         }
-
-        // Bottom Green Study Offline & Sync Indicator Vibrant 3D Banner
-        Tactile3DCard(
-            faceBrush = Brush.linearGradient(
-                listOf(Color(0xFF20E084).copy(alpha = 0.94f), Color(0xFF079E57).copy(alpha = 0.94f))
-            ),
-            depthColor = Color(0xFF046638).copy(alpha = 0.92f),
-            cornerRadius = 18.dp,
-            depthHeight = 4.5.dp,
-            shadowElevation = 9.dp,
-            shadowColor = GreenStart,
-            highlightBorderColor = Color.White.copy(alpha = 0.82f),
-            borderEndColor = Color.White.copy(alpha = 0.28f),
-            glassGlossAlpha = 1.15f,
-            onClick = onSyncNow,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-                .testTag("library_offline_sync_banner")
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.25f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.CheckCircle,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Study Offline",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Download materials for offline use.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.90f)
-                    )
-                }
-                SyncStatusBadge(
-                    syncStatus = syncStatus,
-                    pendingCount = pendingSyncCount,
-                    onClick = onSyncNow
-                )
-            }
-        }
     }
 }
 
