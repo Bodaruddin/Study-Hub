@@ -154,6 +154,7 @@ class OfflineSyncManager(
             }
 
             ACTION_ADD_QUIZ_ATTEMPT -> {
+                val itemIso = SupabaseMappers.formatIso(item.createdAtMillis)
                 val payload = JSONObject().apply {
                     put("id", rowId)
                     put("user_id", userId)
@@ -167,13 +168,14 @@ class OfflineSyncManager(
                     put("score_percent", json.getLong("scorePercent"))
                     put("duration_seconds", json.getLong("durationSeconds"))
                     put("points_earned", json.getLong("pointsEarned"))
-                    put("created_at", nowIso)
-                    put("updated_at", nowIso)
+                    put("created_at", itemIso)
+                    put("updated_at", itemIso)
                 }
                 supabase.upsertOne("quiz_attempts", payload)
             }
 
             ACTION_UPSERT_PROGRESS -> {
+                val itemIso = SupabaseMappers.formatIso(item.createdAtMillis)
                 val payload = JSONObject().apply {
                     put("id", rowId)
                     put("user_id", userId)
@@ -183,7 +185,7 @@ class OfflineSyncManager(
                     put("chapter_title", json.getString("chapterTitle"))
                     put("class_grade", json.getLong("classGrade"))
                     put("progress_percent", json.getLong("progressPercent"))
-                    put("updated_at", nowIso)
+                    put("updated_at", itemIso)
                 }
                 supabase.upsertOne("reading_progress", payload)
             }

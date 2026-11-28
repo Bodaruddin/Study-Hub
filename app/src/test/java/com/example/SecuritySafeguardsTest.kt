@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.PaperAttachmentChunk
 import com.example.data.model.SupabaseMappers
+import com.example.data.model.SupabaseMappers.toSupabaseJson
+import com.example.data.model.UserProfile
 import com.example.data.remote.AttachmentMediaHelper
 import com.example.data.remote.SupabaseRestClient
 import java.io.File
@@ -130,6 +132,7 @@ class SecuritySafeguardsTest {
         val patch = SupabaseMappers.userProfilePatchToSnakeCase(
             mapOf(
                 "role" to "admin",
+                "blocked" to false,
                 "subscriptionTier" to "premium",
                 "subscription_tier" to "premium",
                 "id" to "victim_uid",
@@ -144,6 +147,7 @@ class SecuritySafeguardsTest {
         )
 
         assertFalse(patch.has("role"))
+        assertFalse(patch.has("blocked"))
         assertFalse(patch.has("subscriptionTier"))
         assertFalse(patch.has("subscription_tier"))
         assertFalse(patch.has("id"))
@@ -156,5 +160,36 @@ class SecuritySafeguardsTest {
         assertEquals(12L, patch.getLong("selected_class"))
         assertTrue(patch.getBoolean("dark_theme_enabled"))
         assertTrue(patch.has("updated_at"))
+    }
+
+    @Test
+    fun `user profile blocked field round-trips and admin student update clamps values`() {
+        val profile = UserProfile(
+            id = "uid_123",
+            userId = "uid_123",
+            displayName = "Rahul Verma",
+            email = "rahul@example.com",
+            selectedClass = 9L,
+            role = "student",
+            subscriptionTier = "free",
+            blocked = true
+        )
+        val roundTripped = SupabaseMappers.userProfileFromJson(profile.toSupabaseJson())
+        assertTrue(roundTripped.blocked)
+        assertEquals("Rahul Verma", roundTripped.displayName)
+        assertEquals(9L, roundTripped.selectedClass)
+
+        val adminPatch = SupabaseMappers.adminStudentUpdateJson(
+            displayName = "  Updated Student  ",
+            selectedClass = 20L,
+            subscriptionTier = "invalid_tier",
+            blocked = true
+        )
+        assertEquals("Updated Student", adminPatch.getString("display_name"))
+        assertEquals(12L, adminPatch.getLong("selected_class"))
+        assertEquals("free", adminPatch.getString("subscription_tier"))
+        assertTrue(adminPatch.getBoolean("blocked"))
+        assertFalse(adminPatch.has("role"))
+        assertTrue(adminPatch.has("updated_at"))
     }
 }

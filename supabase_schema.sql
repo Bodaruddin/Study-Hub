@@ -10,18 +10,21 @@ create table if not exists public.user_profiles (
     selected_class bigint not null default 7 check (selected_class between 6 and 12),
     role text not null default 'student' check (role in ('student', 'admin')),
     subscription_tier text not null default 'free' check (subscription_tier in ('free', 'premium')),
-    avg_score bigint not null default 87 check (avg_score between 0 and 100),
-    day_streak bigint not null default 15 check (day_streak >= 0),
-    points bigint not null default 120 check (points >= 0),
+    avg_score bigint not null default 0 check (avg_score between 0 and 100),
+    day_streak bigint not null default 0 check (day_streak >= 0),
+    points bigint not null default 0 check (points >= 0),
     daily_goal_count bigint not null default 5 check (daily_goal_count between 1 and 50),
-    daily_completed_count bigint not null default 3 check (daily_completed_count between 0 and 100),
+    daily_completed_count bigint not null default 0 check (daily_completed_count between 0 and 100),
     dark_theme_enabled boolean not null default false,
     notifications_enabled boolean not null default true,
     exam_reminders_enabled boolean not null default true,
     new_materials_enabled boolean not null default true,
+    blocked boolean not null default false,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.user_profiles add column if not exists blocked boolean not null default false;
 
 create table if not exists public.classes (
     id text primary key,

@@ -29,12 +29,7 @@ object SeedCurriculumData {
                 11L -> "Senior secondary specialization in STEM, Humanities & Languages."
                 else -> "Final board mastery, full-length mock tests & formula sheets."
             },
-            studentCount = when (grade) {
-                7L -> 2480L
-                10L -> 3120L
-                12L -> 2890L
-                else -> 1020L + grade * 45L
-            },
+            studentCount = 0L,
             published = true
         )
     }

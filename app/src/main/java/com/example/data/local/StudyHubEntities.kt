@@ -234,7 +234,8 @@ data class CachedQuizAttemptEntity(
         correctAnswers = correctAnswers,
         scorePercent = scorePercent,
         durationSeconds = durationSeconds,
-        pointsEarned = pointsEarned
+        pointsEarned = pointsEarned,
+        attemptedAtMillis = attemptedAtMillis
     )
 }
 
@@ -257,7 +258,8 @@ data class CachedReadingProgressEntity(
         subjectName = subjectName,
         chapterTitle = chapterTitle,
         classGrade = classGrade,
-        progressPercent = progressPercent
+        progressPercent = progressPercent,
+        updatedAtMillis = updatedAtMillis
     )
 }
 

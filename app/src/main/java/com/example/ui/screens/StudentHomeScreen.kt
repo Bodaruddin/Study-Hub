@@ -130,7 +130,7 @@ fun StudentHomeScreen(
     val continueMaterial = classMaterials.firstOrNull { mat ->
         recentProgress.any { it.materialId == mat.id }
     } ?: classMaterials.firstOrNull()
-    val continuePercent = recentProgress.firstOrNull { it.materialId == continueMaterial?.id }?.progressPercent ?: 75L
+    val continuePercent = recentProgress.firstOrNull { it.materialId == continueMaterial?.id }?.progressPercent ?: 0L
     val downloadedMaterials = materials.filter { it.id in downloadedIds }
     var classMenuOpen by remember { mutableStateOf(false) }
 
@@ -654,7 +654,7 @@ fun StudentHomeScreen(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
-                                                    text = "Continue",
+                                                    text = if (continuePercent > 0L) "Continue" else "Start",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     color = Color(0xFF28198C),
                                                     fontWeight = FontWeight.ExtraBold

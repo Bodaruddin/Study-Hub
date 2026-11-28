@@ -20,6 +20,7 @@ import com.example.data.model.StudyMaterial
 import com.example.data.model.SubjectItem
 import com.example.data.model.SyncStatus
 import com.example.data.model.UserProfile
+import com.example.data.model.UserStatsCalculator
 import com.example.data.remote.OfflineSyncManager
 import com.example.data.remote.SeedCurriculumData
 import com.example.data.remote.StudyHubRepository
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -102,6 +104,8 @@ class StudyHubViewModel(
     private val _supabaseStatus = MutableStateFlow(repository.getSupabaseConnectionStatus())
     val supabaseStatus: StateFlow<SupabaseConnectionStatus> = _supabaseStatus.asStateFlow()
 
+    private val _subcollectionsSynced = MutableStateFlow(!repository.isSupabaseConfigured())
+
     private var timerJob: Job? = null
 
     val isOnline: StateFlow<Boolean> = syncManager.isOnline
@@ -138,10 +142,10 @@ class StudyHubViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val quizAttempts: StateFlow<List<QuizAttemptRecord>> = repository.observeLocalQuizAttempts(currentUserId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val readingProgress: StateFlow<List<ReadingProgressRecord>> = repository.observeLocalReadingProgress(currentUserId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val downloads: StateFlow<List<DownloadRecord>> = repository.observeLocalDownloads(currentUserId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
@@ -169,9 +173,10 @@ class StudyHubViewModel(
         viewModelScope.launch {
             repository.ensureLocalSeedData()
             syncManager.attachUser(currentUserId)
+            syncManager.flushPendingSync(currentUserId)
             val ensured = repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
             ensured.onSuccess { p ->
-                _profile.value = p
+                _profile.value = mergeComputedStatsIfReady(p)
                 if (p.role == "admin" || repository.isVerifiedAdminEmail(currentUserEmail)) {
                     if (!hasAutoRoutedAdmin) {
                         hasAutoRoutedAdmin = true
@@ -182,7 +187,10 @@ class StudyHubViewModel(
                 }
             }
             repository.syncCurriculumFromCloud(isAuthorizedAdmin)
-            repository.syncUserSubcollectionsFromCloud(currentUserId)
+            val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
+            if (subSync.isSuccess || !repository.isSupabaseConfigured()) {
+                _subcollectionsSynced.value = true
+            }
         }
         viewModelScope.launch {
             repository.observeUserProfile(currentUserId)
@@ -191,7 +199,7 @@ class StudyHubViewModel(
                 }
                 .collect { remoteProfile ->
                     if (remoteProfile != null) {
-                        _profile.value = remoteProfile
+                        _profile.value = mergeComputedStatsIfReady(remoteProfile)
                         if (!hasAutoRoutedAdmin && remoteProfile.role == "admin") {
                             hasAutoRoutedAdmin = true
                             _isAdminMode.value = true
@@ -200,6 +208,57 @@ class StudyHubViewModel(
                     }
                 }
         }
+        viewModelScope.launch {
+            combine(quizAttempts, readingProgress, _subcollectionsSynced) { attempts, progress, synced ->
+                Triple(attempts, progress, synced)
+            }.collect { (attempts, progress, synced) ->
+                val stats = UserStatsCalculator.compute(attempts, progress)
+                val hasLocalActivity = attempts.isNotEmpty() || progress.isNotEmpty()
+                if (synced || hasLocalActivity) {
+                    val current = _profile.value
+                    val changed = current.avgScore != stats.avgScore ||
+                        current.dayStreak != stats.dayStreak ||
+                        current.points != stats.points ||
+                        current.dailyCompletedCount != stats.dailyCompletedCount
+                    if (changed) {
+                        _profile.update {
+                            it.copy(
+                                avgScore = stats.avgScore,
+                                dayStreak = stats.dayStreak,
+                                points = stats.points,
+                                dailyCompletedCount = stats.dailyCompletedCount
+                            )
+                        }
+                    }
+                    if (synced && changed) {
+                        repository.updateUserProfileFields(
+                            currentUserId,
+                            mapOf(
+                                "avgScore" to stats.avgScore,
+                                "dayStreak" to stats.dayStreak,
+                                "points" to stats.points,
+                                "dailyCompletedCount" to stats.dailyCompletedCount
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun mergeComputedStatsIfReady(base: UserProfile): UserProfile {
+        val attempts = quizAttempts.value
+        val progress = readingProgress.value
+        if (!_subcollectionsSynced.value && attempts.isEmpty() && progress.isEmpty()) {
+            return base
+        }
+        val stats = UserStatsCalculator.compute(attempts, progress)
+        return base.copy(
+            avgScore = stats.avgScore,
+            dayStreak = stats.dayStreak,
+            points = stats.points,
+            dailyCompletedCount = stats.dailyCompletedCount
+        )
     }
 
     fun clearMessage() {
@@ -304,6 +363,11 @@ class StudyHubViewModel(
         viewModelScope.launch {
             val res = syncManager.flushPendingSync(currentUserId)
             repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+            val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
+            if (subSync.isSuccess || !repository.isSupabaseConfigured()) {
+                _subcollectionsSynced.value = true
+            }
+            if (isAuthorizedAdmin) loadAdminUsers()
             res.onSuccess { count ->
                 _snackbarMessage.value = if (count > 0) "Synced $count offline record(s)" else "Everything is up to date"
             }.onFailure {
@@ -442,16 +506,6 @@ class StudyHubViewModel(
                 durationSeconds = state.elapsedSeconds,
                 pointsEarned = points
             )
-            val newPoints = _profile.value.points + points
-            val newCompleted = (_profile.value.dailyCompletedCount + 1).coerceAtMost(50L)
-            val scorePct = if (state.questions.isNotEmpty()) ((correct * 100) / state.questions.size).toLong() else 0L
-            val attempts = quizAttempts.value
-            val avg = if (attempts.isEmpty()) scorePct else ((attempts.sumOf { it.scorePercent } + scorePct) / (attempts.size + 1))
-            _profile.update { it.copy(points = newPoints, dailyCompletedCount = newCompleted, avgScore = avg) }
-            repository.updateUserProfileFields(
-                currentUserId,
-                mapOf("points" to newPoints, "dailyCompletedCount" to newCompleted, "avgScore" to avg)
-            )
         }
     }
 
@@ -493,6 +547,10 @@ class StudyHubViewModel(
         }
     }
 
+    fun toggleSchoolClassPublish(item: SchoolClass) {
+        saveSchoolClass(item.copy(published = !item.published), isCreate = false)
+    }
+
     fun deleteSchoolClass(id: String) {
         viewModelScope.launch {
             repository.deleteSchoolClass(id)
@@ -504,8 +562,20 @@ class StudyHubViewModel(
     fun saveSubject(item: SubjectItem, isCreate: Boolean) {
         viewModelScope.launch {
             repository.saveSubject(item, isCreate)
-                .onSuccess { _snackbarMessage.value = "Subject saved" }
+                .onSuccess { _snackbarMessage.value = if (isCreate) "Subject saved" else "Subject updated" }
                 .onFailure { _snackbarMessage.value = it.message ?: "Failed to save subject" }
+        }
+    }
+
+    fun toggleSubjectPublish(item: SubjectItem) {
+        saveSubject(item.copy(published = !item.published), isCreate = false)
+    }
+
+    fun deleteSubject(subjectId: String) {
+        viewModelScope.launch {
+            repository.deleteSubject(subjectId)
+                .onSuccess { _snackbarMessage.value = "Subject deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
         }
     }
 
@@ -588,26 +658,48 @@ class StudyHubViewModel(
     }
 
     fun saveQuizWithQuestion(quiz: QuizItem, question: QuizQuestion?) {
+        val isCreate = quiz.id.isBlank()
         viewModelScope.launch {
-            repository.saveQuiz(quiz, isCreate = quiz.id.isBlank())
+            repository.saveQuiz(quiz, isCreate = isCreate)
                 .onSuccess { quizId ->
                     if (question != null) {
                         repository.addQuizQuestion(question.copy(quizId = quizId))
                             .onSuccess { _snackbarMessage.value = "Quiz & question saved" }
                             .onFailure { _snackbarMessage.value = it.message ?: "Quiz saved, but failed to add question" }
                     } else {
-                        _snackbarMessage.value = "Quiz saved"
+                        _snackbarMessage.value = if (isCreate) "Quiz saved" else "Quiz updated"
                     }
                 }
                 .onFailure { _snackbarMessage.value = it.message ?: "Failed to save quiz" }
         }
     }
 
+    fun toggleQuizPublish(quiz: QuizItem) {
+        saveQuizWithQuestion(quiz.copy(published = !quiz.published), null)
+    }
+
+    fun deleteQuiz(quizId: String) {
+        viewModelScope.launch {
+            repository.deleteQuiz(quizId)
+                .onSuccess { _snackbarMessage.value = "Quiz deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
+        }
+    }
+
     fun addQuestionToQuiz(question: QuizQuestion) {
+        val isEdit = question.id.isNotBlank()
         viewModelScope.launch {
             repository.addQuizQuestion(question)
-                .onSuccess { _snackbarMessage.value = "MCQ added to quiz" }
-                .onFailure { _snackbarMessage.value = it.message ?: "Failed to add question" }
+                .onSuccess { _snackbarMessage.value = if (isEdit) "Question updated" else "MCQ added to quiz" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Failed to save question" }
+        }
+    }
+
+    fun deleteQuizQuestion(questionId: String, quizId: String) {
+        viewModelScope.launch {
+            repository.deleteQuizQuestion(questionId, quizId)
+                .onSuccess { _snackbarMessage.value = "Question deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
         }
     }
 
@@ -654,18 +746,103 @@ class StudyHubViewModel(
         repository.loadAttachmentsForParent(parentId, isAdmin = isAuthorizedAdmin)
 
     fun sendAnnouncement(title: String, message: String, targetClass: Long, priority: String) {
-        viewModelScope.launch {
-            repository.sendAnnouncement(
-                AnnouncementItem(
-                    title = title,
-                    message = message,
-                    targetClass = targetClass,
-                    priority = priority,
-                    published = true
-                )
+        saveAnnouncement(
+            AnnouncementItem(
+                title = title,
+                message = message,
+                targetClass = targetClass,
+                priority = priority,
+                published = true
             )
-                .onSuccess { _snackbarMessage.value = "Announcement broadcast!" }
-                .onFailure { _snackbarMessage.value = it.message ?: "Failed to send announcement" }
+        )
+    }
+
+    fun saveAnnouncement(item: AnnouncementItem) {
+        val isCreate = item.id.isBlank()
+        viewModelScope.launch {
+            repository.sendAnnouncement(item)
+                .onSuccess { _snackbarMessage.value = if (isCreate) "Announcement broadcast!" else "Announcement updated" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Failed to save announcement" }
+        }
+    }
+
+    fun toggleAnnouncementPublish(item: AnnouncementItem) {
+        saveAnnouncement(item.copy(published = !item.published))
+    }
+
+    fun deleteAnnouncement(id: String) {
+        viewModelScope.launch {
+            repository.deleteAnnouncement(id)
+                .onSuccess { _snackbarMessage.value = "Announcement deleted" }
+                .onFailure { _snackbarMessage.value = it.message ?: "Delete failed" }
+        }
+    }
+
+    fun adminSetStudentBlocked(user: UserProfile, blocked: Boolean) {
+        val targetUid = user.id.ifBlank { user.userId }
+        viewModelScope.launch {
+            repository.adminSetUserBlocked(targetUid, blocked)
+                .onSuccess {
+                    _adminUsers.update { list ->
+                        list.map { existing ->
+                            if ((existing.id.ifBlank { existing.userId }) == targetUid) {
+                                existing.copy(blocked = blocked)
+                            } else existing
+                        }
+                    }
+                    _snackbarMessage.value = if (blocked) {
+                        "${user.displayName} blocked"
+                    } else {
+                        "${user.displayName} unblocked"
+                    }
+                }
+                .onFailure { _snackbarMessage.value = it.message ?: "Failed to update student status" }
+        }
+    }
+
+    fun adminUpdateStudent(
+        user: UserProfile,
+        displayName: String,
+        selectedClass: Long,
+        subscriptionTier: String,
+        blocked: Boolean
+    ) {
+        val targetUid = user.id.ifBlank { user.userId }
+        val cleanName = displayName.trim().take(80).ifBlank { user.displayName }
+        val cleanTier = if (subscriptionTier == "premium") "premium" else "free"
+        val cleanClass = selectedClass.coerceIn(6L, 12L)
+        viewModelScope.launch {
+            repository.adminUpdateStudent(targetUid, cleanName, cleanClass, cleanTier, blocked)
+                .onSuccess {
+                    _adminUsers.update { list ->
+                        list.map { existing ->
+                            if ((existing.id.ifBlank { existing.userId }) == targetUid) {
+                                existing.copy(
+                                    displayName = cleanName,
+                                    selectedClass = cleanClass,
+                                    subscriptionTier = cleanTier,
+                                    blocked = blocked
+                                )
+                            } else existing
+                        }
+                    }
+                    _snackbarMessage.value = "Student updated"
+                }
+                .onFailure { _snackbarMessage.value = it.message ?: "Failed to update student" }
+        }
+    }
+
+    fun adminDeleteStudent(user: UserProfile) {
+        val targetUid = user.id.ifBlank { user.userId }
+        viewModelScope.launch {
+            repository.adminDeleteStudent(targetUid)
+                .onSuccess {
+                    _adminUsers.update { list ->
+                        list.filterNot { (it.id.ifBlank { it.userId }) == targetUid }
+                    }
+                    _snackbarMessage.value = "Student ${user.displayName} deleted"
+                }
+                .onFailure { _snackbarMessage.value = it.message ?: "Failed to delete student" }
         }
     }
 
@@ -765,6 +942,8 @@ class StudyHubViewModel(
                 repository.ensureUserProfile(currentUserId, currentUserName, currentUserEmail)
                 syncManager.flushPendingSync(currentUserId)
                 repository.syncCurriculumFromCloud(isAuthorizedAdmin)
+                val subSync = repository.syncUserSubcollectionsFromCloud(currentUserId)
+                if (subSync.isSuccess) _subcollectionsSynced.value = true
                 loadAdminUsers()
                 _snackbarMessage.value = "Supabase connected and synced!"
             } else {

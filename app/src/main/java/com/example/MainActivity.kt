@@ -68,6 +68,7 @@ import com.example.data.remote.SupabaseRestClient
 import com.example.ui.components.StudyHubBrandLogo
 import com.example.ui.screens.AdminShellScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.BlockedAccountScreen
 import com.example.ui.screens.ExamPapersScreen
 import com.example.ui.screens.GlobalSearchScreen
 import com.example.ui.screens.LibraryScreen
@@ -215,9 +216,22 @@ private fun StudyHubApp() {
         }
 
         val showAdmin = isAdminMode && viewModel.isAuthorizedAdmin
-        StudyHubTheme(darkTheme = profile.darkThemeEnabled || showAdmin) {
+        val isBlockedStudent = profile.blocked && !viewModel.isAuthorizedAdmin
+        StudyHubTheme(darkTheme = profile.darkThemeEnabled || showAdmin || isBlockedStudent) {
             Box(modifier = Modifier.fillMaxSize()) {
-                if (showAdmin) {
+                if (isBlockedStudent) {
+                    BlockedAccountScreen(
+                        profile = profile,
+                        supportEmail = appSettings.supportEmail,
+                        onSignOut = {
+                            AuthManager.signOut(
+                                credentialManager = credentialManager,
+                                scope = scope,
+                                onBeforeFirebaseSignOut = { viewModel.cleanupBeforeSignOut() }
+                            )
+                        }
+                    )
+                } else if (showAdmin) {
                     BackHandler { viewModel.setAdminMode(false) }
                     AdminShellScreen(
                         profile = profile,
@@ -236,8 +250,11 @@ private fun StudyHubApp() {
                         isDatabaseBusy = isDatabaseBusy,
                         supabaseStatus = supabaseStatus,
                         onSaveClass = viewModel::saveSchoolClass,
+                        onTogglePublishClass = viewModel::toggleSchoolClassPublish,
                         onDeleteClass = viewModel::deleteSchoolClass,
                         onSaveSubject = viewModel::saveSubject,
+                        onTogglePublishSubject = viewModel::toggleSubjectPublish,
+                        onDeleteSubject = viewModel::deleteSubject,
                         onSaveChapter = viewModel::saveChapterWithAttachments,
                         onTogglePublishChapter = viewModel::toggleChapterPublish,
                         onDeleteChapter = viewModel::deleteChapter,
@@ -245,12 +262,21 @@ private fun StudyHubApp() {
                         onTogglePublishMaterial = viewModel::toggleMaterialPublish,
                         onDeleteMaterial = viewModel::deleteStudyMaterial,
                         onSaveQuizWithQuestion = viewModel::saveQuizWithQuestion,
+                        onTogglePublishQuiz = viewModel::toggleQuizPublish,
+                        onDeleteQuiz = viewModel::deleteQuiz,
                         onAddQuestionToQuiz = viewModel::addQuestionToQuiz,
+                        onDeleteQuizQuestion = viewModel::deleteQuizQuestion,
                         onSaveExamPaper = viewModel::saveExamPaperWithAttachments,
                         onTogglePublishExamPaper = viewModel::toggleExamPaperPublish,
                         onDeleteExamPaper = viewModel::deleteExamPaper,
                         onLoadAttachments = viewModel::loadAttachmentsForParent,
-                        onSendAnnouncement = viewModel::sendAnnouncement,
+                        onSaveAnnouncement = viewModel::saveAnnouncement,
+                        onTogglePublishAnnouncement = viewModel::toggleAnnouncementPublish,
+                        onDeleteAnnouncement = viewModel::deleteAnnouncement,
+                        onRefreshStudents = viewModel::loadAdminUsers,
+                        onUpdateStudent = viewModel::adminUpdateStudent,
+                        onSetStudentBlocked = viewModel::adminSetStudentBlocked,
+                        onDeleteStudent = viewModel::adminDeleteStudent,
                         onSaveAppSettings = viewModel::saveAppSettings,
                         onSyncCloudNow = viewModel::syncCloudDatabaseNow,
                         onSeedMissingCloud = viewModel::seedMissingCloudData,

@@ -14,16 +14,21 @@ object SupabaseMappers {
 
     fun nowIso(): String = synchronized(isoFormat) { isoFormat.format(Date()) }
 
-    fun parseIsoToMillis(raw: String?): Long {
-        if (raw.isNullOrBlank()) return System.currentTimeMillis()
+    fun formatIso(millis: Long): String = synchronized(isoFormat) { isoFormat.format(Date(millis)) }
+
+    fun parseIsoToMillisOrNull(raw: String?): Long? {
+        if (raw.isNullOrBlank()) return null
         val normalized = raw.substringBefore('.').substringBefore('+').removeSuffix("Z")
         return runCatching {
             val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")
             }
-            parser.parse(normalized)?.time ?: System.currentTimeMillis()
-        }.getOrDefault(System.currentTimeMillis())
+            parser.parse(normalized)?.time
+        }.getOrNull()
     }
+
+    fun parseIsoToMillis(raw: String?): Long =
+        parseIsoToMillisOrNull(raw) ?: System.currentTimeMillis()
 
     private fun JSONObject.str(key: String, default: String = ""): String =
         if (has(key) && !isNull(key)) optString(key, default) else default
@@ -73,6 +78,7 @@ object SupabaseMappers {
         put("notifications_enabled", notificationsEnabled)
         put("exam_reminders_enabled", examRemindersEnabled)
         put("new_materials_enabled", newMaterialsEnabled)
+        put("blocked", blocked)
         put("updated_at", nowIso())
     }
 
@@ -84,15 +90,16 @@ object SupabaseMappers {
         selectedClass = j.lng("selected_class", 7L),
         role = j.str("role", "student"),
         subscriptionTier = j.str("subscription_tier", "free"),
-        avgScore = j.lng("avg_score", 87L),
-        dayStreak = j.lng("day_streak", 15L),
-        points = j.lng("points", 120L),
+        avgScore = j.lng("avg_score", 0L),
+        dayStreak = j.lng("day_streak", 0L),
+        points = j.lng("points", 0L),
         dailyGoalCount = j.lng("daily_goal_count", 5L),
-        dailyCompletedCount = j.lng("daily_completed_count", 3L),
+        dailyCompletedCount = j.lng("daily_completed_count", 0L),
         darkThemeEnabled = j.bool("dark_theme_enabled", false),
         notificationsEnabled = j.bool("notifications_enabled", true),
         examRemindersEnabled = j.bool("exam_reminders_enabled", true),
         newMaterialsEnabled = j.bool("new_materials_enabled", true),
+        blocked = j.bool("blocked", false),
         createdAt = j.strNullable("created_at"),
         updatedAt = j.strNullable("updated_at")
     )
@@ -126,9 +133,23 @@ object SupabaseMappers {
                 "notificationsEnabled" -> (value as? Boolean)?.let { put("notifications_enabled", it) }
                 "examRemindersEnabled" -> (value as? Boolean)?.let { put("exam_reminders_enabled", it) }
                 "newMaterialsEnabled" -> (value as? Boolean)?.let { put("new_materials_enabled", it) }
-                // Explicitly ignore role, subscriptionTier, subscription_tier, id, userId, user_id, email, and any unknown key
+                // Explicitly ignore role, blocked, subscriptionTier, subscription_tier, id, userId, user_id, email, and any unknown key
             }
         }
+        put("updated_at", nowIso())
+    }
+
+    fun adminStudentUpdateJson(
+        displayName: String,
+        selectedClass: Long,
+        subscriptionTier: String,
+        blocked: Boolean
+    ): JSONObject = JSONObject().apply {
+        val cleanName = displayName.trim().take(80)
+        if (cleanName.isNotBlank()) put("display_name", cleanName)
+        put("selected_class", selectedClass.coerceIn(6L, 12L))
+        put("subscription_tier", if (subscriptionTier == "premium") "premium" else "free")
+        put("blocked", blocked)
         put("updated_at", nowIso())
     }
 
@@ -441,33 +462,43 @@ object SupabaseMappers {
         updatedAt = j.strNullable("updated_at")
     )
 
-    fun quizAttemptFromJson(j: JSONObject, uid: String): QuizAttemptRecord = QuizAttemptRecord(
-        id = j.str("id").removePrefix("${uid}__"),
-        quizId = j.str("quiz_id"),
-        quizTitle = j.str("quiz_title"),
-        subjectName = j.str("subject_name"),
-        classGrade = j.lng("class_grade", 7L),
-        mode = j.str("mode", "practice"),
-        totalQuestions = j.lng("total_questions", 0L),
-        correctAnswers = j.lng("correct_answers", 0L),
-        scorePercent = j.lng("score_percent", 0L),
-        durationSeconds = j.lng("duration_seconds", 0L),
-        pointsEarned = j.lng("points_earned", 0L),
-        createdAt = j.strNullable("created_at"),
-        updatedAt = j.strNullable("updated_at")
-    )
+    fun quizAttemptFromJson(j: JSONObject, uid: String): QuizAttemptRecord {
+        val created = j.strNullable("created_at")
+        val updated = j.strNullable("updated_at")
+        return QuizAttemptRecord(
+            id = j.str("id").removePrefix("${uid}__"),
+            quizId = j.str("quiz_id"),
+            quizTitle = j.str("quiz_title"),
+            subjectName = j.str("subject_name"),
+            classGrade = j.lng("class_grade", 7L),
+            mode = j.str("mode", "practice"),
+            totalQuestions = j.lng("total_questions", 0L),
+            correctAnswers = j.lng("correct_answers", 0L),
+            scorePercent = j.lng("score_percent", 0L),
+            durationSeconds = j.lng("duration_seconds", 0L),
+            pointsEarned = j.lng("points_earned", 0L),
+            attemptedAtMillis = parseIsoToMillis(created ?: updated),
+            createdAt = created,
+            updatedAt = updated
+        )
+    }
 
-    fun readingProgressFromJson(j: JSONObject, uid: String): ReadingProgressRecord = ReadingProgressRecord(
-        id = j.str("id").removePrefix("${uid}__"),
-        materialId = j.str("material_id"),
-        title = j.str("title"),
-        subjectName = j.str("subject_name"),
-        chapterTitle = j.str("chapter_title"),
-        classGrade = j.lng("class_grade", 7L),
-        progressPercent = j.lng("progress_percent", 0L),
-        createdAt = j.strNullable("created_at"),
-        updatedAt = j.strNullable("updated_at")
-    )
+    fun readingProgressFromJson(j: JSONObject, uid: String): ReadingProgressRecord {
+        val created = j.strNullable("created_at")
+        val updated = j.strNullable("updated_at")
+        return ReadingProgressRecord(
+            id = j.str("id").removePrefix("${uid}__"),
+            materialId = j.str("material_id"),
+            title = j.str("title"),
+            subjectName = j.str("subject_name"),
+            chapterTitle = j.str("chapter_title"),
+            classGrade = j.lng("class_grade", 7L),
+            progressPercent = j.lng("progress_percent", 0L),
+            updatedAtMillis = parseIsoToMillis(updated ?: created),
+            createdAt = created,
+            updatedAt = updated
+        )
+    }
 
     fun downloadFromJson(j: JSONObject, uid: String): DownloadRecord = DownloadRecord(
         id = j.str("id").removePrefix("${uid}__"),

@@ -129,8 +129,17 @@ import com.example.ui.theme.TealStart
 import kotlinx.coroutines.launch
 
 import androidx.compose.material.icons.rounded.AdsClick
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.runtime.LaunchedEffect
+import com.example.data.model.SupabaseMappers
 import com.example.data.model.SyncStatus
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 
 enum class AdminModule(val label: String) {
     DASHBOARD("Dashboard"),
@@ -184,8 +193,11 @@ fun AdminShellScreen(
     isDatabaseBusy: Boolean,
     supabaseStatus: SupabaseConnectionStatus,
     onSaveClass: (SchoolClass, Boolean) -> Unit,
+    onTogglePublishClass: (SchoolClass) -> Unit,
     onDeleteClass: (String) -> Unit,
     onSaveSubject: (SubjectItem, Boolean) -> Unit,
+    onTogglePublishSubject: (SubjectItem) -> Unit,
+    onDeleteSubject: (String) -> Unit,
     onSaveChapter: (ChapterItem, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishChapter: (ChapterItem) -> Unit,
     onDeleteChapter: (String) -> Unit,
@@ -193,12 +205,21 @@ fun AdminShellScreen(
     onTogglePublishMaterial: (StudyMaterial) -> Unit,
     onDeleteMaterial: (String) -> Unit,
     onSaveQuizWithQuestion: (QuizItem, QuizQuestion?) -> Unit,
+    onTogglePublishQuiz: (QuizItem) -> Unit,
+    onDeleteQuiz: (String) -> Unit,
     onAddQuestionToQuiz: (QuizQuestion) -> Unit,
+    onDeleteQuizQuestion: (String, String) -> Unit,
     onSaveExamPaper: (ExamPaper, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishExamPaper: (ExamPaper) -> Unit,
     onDeleteExamPaper: (String) -> Unit,
     onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
-    onSendAnnouncement: (String, String, Long, String) -> Unit,
+    onSaveAnnouncement: (AnnouncementItem) -> Unit,
+    onTogglePublishAnnouncement: (AnnouncementItem) -> Unit,
+    onDeleteAnnouncement: (String) -> Unit,
+    onRefreshStudents: () -> Unit,
+    onUpdateStudent: (UserProfile, String, Long, String, Boolean) -> Unit,
+    onSetStudentBlocked: (UserProfile, Boolean) -> Unit,
+    onDeleteStudent: (UserProfile) -> Unit,
     onSaveAppSettings: (AppSettings) -> Unit,
     onSyncCloudNow: () -> Unit,
     onSeedMissingCloud: () -> Unit,
@@ -214,32 +235,64 @@ fun AdminShellScreen(
     var activeModule by remember { mutableStateOf(AdminModule.DASHBOARD) }
     var activeBottomTab by remember { mutableIntStateOf(0) }
     var showAddClassDialog by remember { mutableStateOf(false) }
+    var editingClass by remember { mutableStateOf<SchoolClass?>(null) }
     var showAddSubjectDialog by remember { mutableStateOf(false) }
+    var editingSubject by remember { mutableStateOf<SubjectItem?>(null) }
     var showUploadMaterialDialog by remember { mutableStateOf(false) }
     var editingMaterial by remember { mutableStateOf<StudyMaterial?>(null) }
     var showAddMcqDialog by remember { mutableStateOf(false) }
+    var preselectedQuizIdForMcq by remember { mutableStateOf<String?>(null) }
+    var editingQuestion by remember { mutableStateOf<QuizQuestion?>(null) }
     var showCreateQuizDialog by remember { mutableStateOf(false) }
+    var editingQuiz by remember { mutableStateOf<QuizItem?>(null) }
     var showAnnouncementDialog by remember { mutableStateOf(false) }
+    var editingAnnouncement by remember { mutableStateOf<AnnouncementItem?>(null) }
     var showSupabaseSetupDialog by remember { mutableStateOf(false) }
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    if (showAddClassDialog) {
-        AdminAddClassDialog(
-            onDismiss = { showAddClassDialog = false },
-            onSave = { item ->
-                onSaveClass(item, true)
+    LaunchedEffect(activeModule, supabaseStatus.configured) {
+        if (supabaseStatus.configured && activeModule in setOf(
+                AdminModule.DASHBOARD,
+                AdminModule.CLASSES,
+                AdminModule.STUDENTS,
+                AdminModule.ANALYTICS,
+                AdminModule.DATABASE,
+                AdminModule.SUPPORT
+            )
+        ) {
+            onRefreshStudents()
+        }
+    }
+
+    if (showAddClassDialog || editingClass != null) {
+        val target = editingClass
+        AdminClassEditorDialog(
+            initialClass = target,
+            onDismiss = {
                 showAddClassDialog = false
+                editingClass = null
+            },
+            onSave = { item ->
+                onSaveClass(item, target == null)
+                showAddClassDialog = false
+                editingClass = null
             }
         )
     }
-    if (showAddSubjectDialog) {
-        AdminAddSubjectDialog(
-            onDismiss = { showAddSubjectDialog = false },
-            onSave = { item ->
-                onSaveSubject(item, true)
+    if (showAddSubjectDialog || editingSubject != null) {
+        val target = editingSubject
+        AdminSubjectEditorDialog(
+            initialSubject = target,
+            onDismiss = {
                 showAddSubjectDialog = false
+                editingSubject = null
+            },
+            onSave = { item ->
+                onSaveSubject(item, target == null)
+                showAddSubjectDialog = false
+                editingSubject = null
             }
         )
     }
@@ -265,33 +318,54 @@ fun AdminShellScreen(
             }
         )
     }
-    if (showAddMcqDialog) {
-        AdminAddMcqDialog(
+    if (showAddMcqDialog || editingQuestion != null) {
+        val targetQ = editingQuestion
+        AdminMcqEditorDialog(
             quizzes = quizzes,
-            onDismiss = { showAddMcqDialog = false },
+            initialQuestion = targetQ,
+            preselectedQuizId = preselectedQuizIdForMcq,
+            onDismiss = {
+                showAddMcqDialog = false
+                preselectedQuizIdForMcq = null
+                editingQuestion = null
+            },
             onSave = { q ->
                 onAddQuestionToQuiz(q)
                 showAddMcqDialog = false
+                preselectedQuizIdForMcq = null
+                editingQuestion = null
             }
         )
     }
-    if (showCreateQuizDialog) {
-        AdminCreateQuizDialog(
+    if (showCreateQuizDialog || editingQuiz != null) {
+        val targetQuiz = editingQuiz
+        AdminQuizEditorDialog(
             subjects = subjects,
             chapters = chapters,
-            onDismiss = { showCreateQuizDialog = false },
+            initialQuiz = targetQuiz,
+            onDismiss = {
+                showCreateQuizDialog = false
+                editingQuiz = null
+            },
             onSave = { quiz, firstQ ->
                 onSaveQuizWithQuestion(quiz, firstQ)
                 showCreateQuizDialog = false
+                editingQuiz = null
             }
         )
     }
-    if (showAnnouncementDialog) {
-        AdminAnnouncementDialog(
-            onDismiss = { showAnnouncementDialog = false },
-            onSend = { title, msg, grade, prio ->
-                onSendAnnouncement(title, msg, grade, prio)
+    if (showAnnouncementDialog || editingAnnouncement != null) {
+        val targetAnn = editingAnnouncement
+        AdminAnnouncementEditorDialog(
+            initialAnnouncement = targetAnn,
+            onDismiss = {
                 showAnnouncementDialog = false
+                editingAnnouncement = null
+            },
+            onSave = { item ->
+                onSaveAnnouncement(item)
+                showAnnouncementDialog = false
+                editingAnnouncement = null
             }
         )
     }
@@ -403,27 +477,58 @@ fun AdminShellScreen(
                 when (activeModule) {
                     AdminModule.DASHBOARD -> AdminDashboardContent(
                         profile = profile,
-                        classes = classes,
+                        subjects = subjects,
+                        chapters = chapters,
                         materials = materials,
                         quizzes = quizzes,
+                        questions = questions,
+                        examPapers = examPapers,
                         announcements = announcements,
+                        adminUsers = adminUsers,
                         supabaseStatus = supabaseStatus,
                         onOpenSupabaseSetup = { showSupabaseSetupDialog = true },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenAnnouncements = { activeModule = AdminModule.ANNOUNCEMENTS },
-                        onAddClass = { showAddClassDialog = true },
-                        onAddSubject = { showAddSubjectDialog = true },
-                        onUploadMaterial = { showUploadMaterialDialog = true },
-                        onAddMcqs = { showAddMcqDialog = true },
-                        onCreateTest = { showCreateQuizDialog = true },
-                        onSendAnnouncement = { showAnnouncementDialog = true },
+                        onAddClass = {
+                            editingClass = null
+                            showAddClassDialog = true
+                        },
+                        onAddSubject = {
+                            editingSubject = null
+                            showAddSubjectDialog = true
+                        },
+                        onUploadMaterial = {
+                            editingMaterial = null
+                            showUploadMaterialDialog = true
+                        },
+                        onAddMcqs = {
+                            editingQuestion = null
+                            preselectedQuizIdForMcq = null
+                            showAddMcqDialog = true
+                        },
+                        onCreateTest = {
+                            editingQuiz = null
+                            showCreateQuizDialog = true
+                        },
+                        onSendAnnouncement = {
+                            editingAnnouncement = null
+                            showAnnouncementDialog = true
+                        },
+                        onOpenManageStudents = {
+                            onRefreshStudents()
+                            activeModule = AdminModule.STUDENTS
+                        },
+                        onOpenManageMaterials = { activeModule = AdminModule.MATERIALS },
+                        onOpenManageQuizzes = { activeModule = AdminModule.QUIZZES },
+                        onOpenManageSubjects = { activeModule = AdminModule.SUBJECTS },
                         onViewAllQuick = { activeModule = AdminModule.MATERIALS },
-                        onViewAllActivity = { activeModule = AdminModule.MATERIALS },
+                        onViewAllActivity = { activeModule = AdminModule.ANALYTICS },
                         onSwitchToStudent = onSwitchToStudentView
                     )
 
                     else -> AdminSubmoduleScaffold(
                         module = activeModule,
+                        currentAdminUid = profile.id.ifBlank { profile.userId },
                         classes = classes,
                         subjects = subjects,
                         chapters = chapters,
@@ -443,10 +548,24 @@ fun AdminShellScreen(
                             activeBottomTab = 0
                         },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onNavigateModule = { target -> activeModule = target },
-                        onOpenAddClass = { showAddClassDialog = true },
+                        onNavigateModule = { target ->
+                            if (target == AdminModule.STUDENTS) onRefreshStudents()
+                            activeModule = target
+                        },
+                        onOpenAddClass = {
+                            editingClass = null
+                            showAddClassDialog = true
+                        },
+                        onEditClass = { editingClass = it },
+                        onTogglePublishClass = onTogglePublishClass,
                         onDeleteClass = onDeleteClass,
-                        onOpenAddSubject = { showAddSubjectDialog = true },
+                        onOpenAddSubject = {
+                            editingSubject = null
+                            showAddSubjectDialog = true
+                        },
+                        onEditSubject = { editingSubject = it },
+                        onTogglePublishSubject = onTogglePublishSubject,
+                        onDeleteSubject = onDeleteSubject,
                         onSaveChapter = onSaveChapter,
                         onTogglePublishChapter = onTogglePublishChapter,
                         onDeleteChapter = onDeleteChapter,
@@ -457,13 +576,35 @@ fun AdminShellScreen(
                         onEditMaterial = { mat -> editingMaterial = mat },
                         onTogglePublishMaterial = onTogglePublishMaterial,
                         onDeleteMaterial = onDeleteMaterial,
-                        onOpenAddMcq = { showAddMcqDialog = true },
-                        onOpenCreateQuiz = { showCreateQuizDialog = true },
+                        onOpenAddMcq = { quizId ->
+                            editingQuestion = null
+                            preselectedQuizIdForMcq = quizId
+                            showAddMcqDialog = true
+                        },
+                        onEditQuestion = { q -> editingQuestion = q },
+                        onDeleteQuestion = onDeleteQuizQuestion,
+                        onOpenCreateQuiz = {
+                            editingQuiz = null
+                            showCreateQuizDialog = true
+                        },
+                        onEditQuiz = { quiz -> editingQuiz = quiz },
+                        onTogglePublishQuiz = onTogglePublishQuiz,
+                        onDeleteQuiz = onDeleteQuiz,
                         onSaveExamPaper = onSaveExamPaper,
                         onTogglePublishExamPaper = onTogglePublishExamPaper,
                         onDeleteExamPaper = onDeleteExamPaper,
                         onLoadAttachments = onLoadAttachments,
-                        onOpenAnnouncementDialog = { showAnnouncementDialog = true },
+                        onOpenAnnouncementDialog = {
+                            editingAnnouncement = null
+                            showAnnouncementDialog = true
+                        },
+                        onEditAnnouncement = { editingAnnouncement = it },
+                        onTogglePublishAnnouncement = onTogglePublishAnnouncement,
+                        onDeleteAnnouncement = onDeleteAnnouncement,
+                        onRefreshStudents = onRefreshStudents,
+                        onUpdateStudent = onUpdateStudent,
+                        onSetStudentBlocked = onSetStudentBlocked,
+                        onDeleteStudent = onDeleteStudent,
                         onSaveAppSettings = onSaveAppSettings,
                         onSyncCloudNow = onSyncCloudNow,
                         onSeedMissingCloud = onSeedMissingCloud,
@@ -478,13 +619,25 @@ fun AdminShellScreen(
     }
 }
 
+private data class AdminActivityEntry(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val trailingLabel: String,
+    val timestampMillis: Long
+)
+
 @Composable
 private fun AdminDashboardContent(
     profile: UserProfile,
-    classes: List<SchoolClass>,
+    subjects: List<SubjectItem>,
+    chapters: List<ChapterItem>,
     materials: List<StudyMaterial>,
     quizzes: List<QuizItem>,
+    questions: List<QuizQuestion>,
+    examPapers: List<ExamPaper>,
     announcements: List<AnnouncementItem>,
+    adminUsers: List<UserProfile>,
     supabaseStatus: SupabaseConnectionStatus,
     onOpenSupabaseSetup: () -> Unit,
     onOpenDrawer: () -> Unit,
@@ -495,12 +648,19 @@ private fun AdminDashboardContent(
     onAddMcqs: () -> Unit,
     onCreateTest: () -> Unit,
     onSendAnnouncement: () -> Unit,
+    onOpenManageStudents: () -> Unit,
+    onOpenManageMaterials: () -> Unit,
+    onOpenManageQuizzes: () -> Unit,
+    onOpenManageSubjects: () -> Unit,
     onViewAllQuick: () -> Unit,
     onViewAllActivity: () -> Unit,
     onSwitchToStudent: () -> Unit
 ) {
-    val totalStudents = classes.sumOf { it.studentCount }.coerceAtLeast(12580L)
-    var analyticsRange by remember { mutableStateOf("Last 7 Days") }
+    val studentAccounts = remember(adminUsers) { adminUsers.filter { it.role != "admin" } }
+    val totalStudents = studentAccounts.size
+    val activeStudents = studentAccounts.count { !it.blocked }
+    val blockedStudents = studentAccounts.count { it.blocked }
+    var analyticsRange by remember { mutableStateOf("By Class (6–12)") }
     var rangeMenuOpen by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -592,22 +752,24 @@ private fun AdminDashboardContent(
                                 )
                             }
                         }
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 4.dp, end = 4.dp)
-                                .size(17.dp)
-                                .clip(CircleShape)
-                                .background(DangerRed)
-                                .border(1.2.dp, Color.White, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = announcements.size.coerceAtLeast(1).coerceAtMost(9).toString(),
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (announcements.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 4.dp, end = 4.dp)
+                                    .size(17.dp)
+                                    .clip(CircleShape)
+                                    .background(DangerRed)
+                                    .border(1.2.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = announcements.size.coerceAtMost(9).toString(),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.width(4.dp))
@@ -782,7 +944,7 @@ private fun AdminDashboardContent(
             }
         }
 
-        // 2x2 Vibrant 3D Glassy Floating KPI Cards
+        // 2x2 Vibrant 3D Glassy Floating KPI Cards (100% real data)
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -790,18 +952,22 @@ private fun AdminDashboardContent(
                         icon = Icons.Rounded.Group,
                         value = "%,d".format(totalStudents),
                         label = "Total Students",
-                        trend = "↑ +8.5%",
+                        trend = if (blockedStudents > 0) "$activeStudents active • $blockedStudents blk" else "$activeStudents active",
                         colors = listOf(BlueStart, BlueEnd),
                         depthColor = Color(0xFF092E8A),
-                        modifier = Modifier.weight(1f)
+                        onClick = onOpenManageStudents,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("kpi_manage_students")
                     )
                     AdminKpiCard(
                         icon = Icons.Rounded.MenuBook,
                         value = "${materials.size}",
                         label = "Study Materials",
-                        trend = "↑ +12.3%",
+                        trend = "${materials.count { it.published }} published",
                         colors = listOf(GreenStart, GreenEnd),
                         depthColor = Color(0xFF045E34),
+                        onClick = onOpenManageMaterials,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -810,19 +976,23 @@ private fun AdminDashboardContent(
                         icon = Icons.Rounded.Description,
                         value = "${quizzes.size}",
                         label = "Total Quizzes",
-                        trend = "↑ +10.1%",
+                        trend = "${questions.size} MCQs",
                         colors = listOf(OrangeStart, OrangeEnd),
                         depthColor = Color(0xFF9E3C00),
+                        onClick = onOpenManageQuizzes,
                         modifier = Modifier.weight(1f)
                     )
                     AdminKpiCard(
-                        icon = Icons.Rounded.Star,
-                        value = "4.8 / 5",
-                        label = "Average Rating",
-                        trend = "↑ +0.2",
+                        icon = Icons.Rounded.AutoStories,
+                        value = "${subjects.size}",
+                        label = "Subjects",
+                        trend = "${chapters.size} ch • ${examPapers.size} papers",
                         colors = listOf(PurpleStart, PurpleEnd),
                         depthColor = Color(0xFF33088C),
-                        modifier = Modifier.weight(1f)
+                        onClick = onOpenManageSubjects,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("kpi_manage_subjects")
                     )
                 }
             }
@@ -914,7 +1084,7 @@ private fun AdminDashboardContent(
                                 }
                             }
                             DropdownMenu(expanded = rangeMenuOpen, onDismissRequest = { rangeMenuOpen = false }) {
-                                listOf("Last 7 Days", "Last 30 Days", "This Term").forEach { opt ->
+                                listOf("By Class (6–12)", "Last 7 Days", "Last 30 Days").forEach { opt ->
                                     DropdownMenuItem(text = { Text(opt) }, onClick = {
                                         analyticsRange = opt
                                         rangeMenuOpen = false
@@ -924,20 +1094,95 @@ private fun AdminDashboardContent(
                         }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                    val studentsPts = if (analyticsRange == "Last 7 Days") {
-                        listOf(0.45f, 0.62f, 0.72f, 0.60f, 0.76f, 0.85f, 0.96f)
-                    } else {
-                        listOf(0.35f, 0.48f, 0.58f, 0.70f, 0.78f, 0.88f, 0.98f)
+                    val zoneId = remember { ZoneId.systemDefault() }
+                    val today = LocalDate.now(zoneId)
+                    val chartData = remember(analyticsRange, studentAccounts, materials, quizzes, examPapers, announcements) {
+                        when (analyticsRange) {
+                            "By Class (6–12)" -> {
+                                val grades = (6L..12L).toList()
+                                val xLabels = grades.map { "C$it" }
+                                val counts1 = grades.map { g -> studentAccounts.count { it.selectedClass == g } }
+                                val counts2 = grades.map { g ->
+                                    materials.count { it.classGrade == g } +
+                                        quizzes.count { it.classGrade == g } +
+                                        examPapers.count { it.classGrade == g }
+                                }
+                                Triple(xLabels, counts1 to counts2, "Students" to "Content")
+                            }
+                            "Last 7 Days" -> {
+                                val days = (6 downTo 0).map { offset -> today.minusDays(offset.toLong()) }
+                                val xLabels = days.map { d -> d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US) }
+                                val counts1 = days.map { day ->
+                                    studentAccounts.count { u ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(u.createdAt)
+                                        ms == null || !Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate().isAfter(day)
+                                    }
+                                }
+                                val counts2 = days.map { day ->
+                                    val activeUsersOnDay = studentAccounts.count { u ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(u.updatedAt ?: u.createdAt)
+                                        ms != null && Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate() == day
+                                    }
+                                    val annsOnDay = announcements.count { a ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(a.createdAt)
+                                        ms != null && Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate() == day
+                                    }
+                                    activeUsersOnDay + annsOnDay
+                                }
+                                Triple(xLabels, counts1 to counts2, "Students" to "Activity")
+                            }
+                            else -> {
+                                val buckets = (6 downTo 0).map { idx -> today.minusDays((idx * 5).toLong()) }
+                                val xLabels = buckets.mapIndexed { idx, d ->
+                                    if (idx == buckets.lastIndex) "Now" else "-${(buckets.lastIndex - idx) * 5}d"
+                                }
+                                val counts1 = buckets.map { day ->
+                                    studentAccounts.count { u ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(u.createdAt)
+                                        ms == null || !Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate().isAfter(day)
+                                    }
+                                }
+                                val counts2 = buckets.mapIndexed { idx, day ->
+                                    val prev = if (idx == 0) day.minusDays(5) else buckets[idx - 1]
+                                    val activeInWindow = studentAccounts.count { u ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(u.updatedAt ?: u.createdAt)
+                                        if (ms == null) false else {
+                                            val ld = Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate()
+                                            ld.isAfter(prev) && !ld.isAfter(day)
+                                        }
+                                    }
+                                    val annsInWindow = announcements.count { a ->
+                                        val ms = SupabaseMappers.parseIsoToMillisOrNull(a.createdAt)
+                                        if (ms == null) false else {
+                                            val ld = Instant.ofEpochMilli(ms).atZone(zoneId).toLocalDate()
+                                            ld.isAfter(prev) && !ld.isAfter(day)
+                                        }
+                                    }
+                                    activeInWindow + annsInWindow
+                                }
+                                Triple(xLabels, counts1 to counts2, "Students" to "Activity")
+                            }
+                        }
                     }
-                    val quizPts = if (analyticsRange == "Last 7 Days") {
-                        listOf(0.24f, 0.38f, 0.48f, 0.39f, 0.52f, 0.65f, 0.75f)
-                    } else {
-                        listOf(0.20f, 0.32f, 0.44f, 0.54f, 0.61f, 0.72f, 0.84f)
-                    }
+                    val xLabels = chartData.first
+                    val series1Counts = chartData.second.first
+                    val series2Counts = chartData.second.second
+                    val legend1 = chartData.third.first
+                    val legend2 = chartData.third.second
+                    val rawMax = maxOf(series1Counts.maxOrNull() ?: 0, series2Counts.maxOrNull() ?: 0)
+                    val yMax = ((maxOf(rawMax, 3) + 2) / 3) * 3
+                    val yLabels = listOf(yMax, (yMax * 2) / 3, yMax / 3, 0).map { it.toString() }
+                    val studentsPts = series1Counts.map { it.toFloat() / yMax.toFloat() }
+                    val secondPts = series2Counts.map { it.toFloat() / yMax.toFloat() }
+
                     PlatformAnalyticsLineChart(
                         studentsSeries = studentsPts,
-                        quizzesSeries = quizPts,
-                        peakLabel = if (analyticsRange == "Last 7 Days") "12.5K" else "48.2K"
+                        quizzesSeries = secondPts,
+                        days = xLabels,
+                        yAxisLabels = yLabels,
+                        legend1Label = legend1,
+                        legend2Label = legend2,
+                        peakLabel = "Peak: $rawMax"
                     )
                 }
             }
@@ -1007,6 +1252,37 @@ private fun AdminDashboardContent(
                         AdminQuickActionButton("Create\nTest", Icons.Rounded.Description, listOf(TealStart, TealEnd), Color(0xFF065466), onCreateTest, Modifier.weight(1f))
                         AdminQuickActionButton("Send\nAnnouncement", Icons.Rounded.Campaign, listOf(PinkStart, PinkEnd), Color(0xFF870B3A), onSendAnnouncement, Modifier.weight(1f))
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Tactile3DCard(
+                        faceBrush = Brush.linearGradient(listOf(BlueStart.copy(alpha = 0.94f), PurpleEnd.copy(alpha = 0.94f))),
+                        depthColor = Color(0xFF1A0F4D),
+                        shadowColor = ElectricPurple,
+                        cornerRadius = 14.dp,
+                        depthHeight = 3.5.dp,
+                        floatingLift = 3.dp,
+                        glassGlossAlpha = 1.0f,
+                        onClick = onOpenManageStudents,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("dashboard_manage_students_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Rounded.Group, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Manage Students (Edit • Block • Delete)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1064,57 +1340,137 @@ private fun AdminDashboardContent(
                         )
                     }
 
-                    materials.take(3).forEachIndexed { idx, mat ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF192252).copy(alpha = 0.62f))
-                                .border(
-                                    width = 1.dp,
-                                    color = Color.White.copy(alpha = 0.10f),
-                                    shape = RoundedCornerShape(14.dp)
+                    val activityEntries = remember(studentAccounts, materials, quizzes, examPapers, announcements) {
+                        val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm", Locale.US)
+                        val zoneId = ZoneId.systemDefault()
+                        fun formatIsoShort(iso: String?, fallback: String): String {
+                            val ms = SupabaseMappers.parseIsoToMillisOrNull(iso) ?: return fallback
+                            return Instant.ofEpochMilli(ms).atZone(zoneId).format(formatter)
+                        }
+                        buildList {
+                            studentAccounts.forEach { u ->
+                                val iso = u.updatedAt ?: u.createdAt
+                                add(
+                                    AdminActivityEntry(
+                                        title = u.displayName,
+                                        subtitle = "Student • Class ${u.selectedClass} • ${if (u.blocked) "Blocked" else "${u.points} pts"}",
+                                        icon = Icons.Rounded.Person,
+                                        trailingLabel = formatIsoShort(iso, "Registered"),
+                                        timestampMillis = SupabaseMappers.parseIsoToMillisOrNull(iso) ?: 0L
+                                    )
                                 )
-                                .padding(horizontal = 10.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
+                            }
+                            announcements.forEach { a ->
+                                val iso = a.updatedAt ?: a.createdAt
+                                add(
+                                    AdminActivityEntry(
+                                        title = a.title,
+                                        subtitle = "Announcement • ${if (a.targetClass == 0L) "All Classes" else "Class ${a.targetClass}"}",
+                                        icon = Icons.Rounded.Campaign,
+                                        trailingLabel = formatIsoShort(iso, if (a.published) "Live" else "Draft"),
+                                        timestampMillis = SupabaseMappers.parseIsoToMillisOrNull(iso) ?: 0L
+                                    )
+                                )
+                            }
+                            materials.forEach { m ->
+                                add(
+                                    AdminActivityEntry(
+                                        title = m.title,
+                                        subtitle = "Material • Class ${m.classGrade} • ${m.subjectName}",
+                                        icon = Icons.Rounded.AutoStories,
+                                        trailingLabel = if (m.published) "Published" else "Draft",
+                                        timestampMillis = 0L
+                                    )
+                                )
+                            }
+                            quizzes.forEach { q ->
+                                add(
+                                    AdminActivityEntry(
+                                        title = q.title,
+                                        subtitle = "Quiz • Class ${q.classGrade} • ${q.questionCount} MCQs",
+                                        icon = Icons.Rounded.Quiz,
+                                        trailingLabel = if (q.published) "Published" else "Draft",
+                                        timestampMillis = 0L
+                                    )
+                                )
+                            }
+                            examPapers.forEach { ep ->
+                                add(
+                                    AdminActivityEntry(
+                                        title = ep.title,
+                                        subtitle = "Paper • Class ${ep.classGrade} • ${ep.year}",
+                                        icon = Icons.Rounded.Description,
+                                        trailingLabel = if (ep.published) "Published" else "Draft",
+                                        timestampMillis = 0L
+                                    )
+                                )
+                            }
+                        }.sortedByDescending { it.timestampMillis }.take(4)
+                    }
+
+                    if (activityEntries.isEmpty()) {
+                        Text(
+                            text = "No recent platform activity yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF9AA5D1),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        activityEntries.forEach { entry ->
+                            Row(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(
-                                                ElectricPurple.copy(alpha = 0.42f),
-                                                ElectricPurple.copy(alpha = 0.20f)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF192252).copy(alpha = 0.62f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color.White.copy(alpha = 0.10f),
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(
+                                                    ElectricPurple.copy(alpha = 0.42f),
+                                                    ElectricPurple.copy(alpha = 0.20f)
+                                                )
                                             )
                                         )
+                                        .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(entry.icon, contentDescription = null, tint = Color(0xFFD2BFFF), modifier = Modifier.size(18.dp))
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = entry.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Rounded.AutoStories, contentDescription = null, tint = Color(0xFFD2BFFF), modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = entry.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF9AA5D1),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = mat.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Class ${mat.classGrade} • ${mat.subjectName} • ${if (mat.published) "Published" else "Draft"}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    text = entry.trailingLabel,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFF9AA5D1)
                                 )
                             }
-                            Text(
-                                text = if (idx == 0) "2m ago" else "${(idx + 1) * 14}m ago",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF9AA5D1)
-                            )
                         }
                     }
                 }
@@ -1131,6 +1487,7 @@ private fun AdminKpiCard(
     trend: String,
     colors: List<Color>,
     depthColor: Color,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Tactile3DCard(
@@ -1141,6 +1498,7 @@ private fun AdminKpiCard(
         depthHeight = 4.5.dp,
         floatingLift = 4.5.dp,
         glassGlossAlpha = 1.1f,
+        onClick = onClick,
         modifier = modifier
     ) {
         Box(

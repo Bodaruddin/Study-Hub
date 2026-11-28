@@ -75,6 +75,15 @@ interface StudyHubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertQuestions(items: List<CachedQuestionEntity>)
 
+    @Query("DELETE FROM cached_quizzes WHERE id = :id")
+    suspend fun deleteQuizById(id: String)
+
+    @Query("DELETE FROM cached_questions WHERE quizId = :quizId")
+    suspend fun deleteQuestionsByQuizId(quizId: String)
+
+    @Query("DELETE FROM cached_questions WHERE id = :id")
+    suspend fun deleteQuestionById(id: String)
+
     // Exam Papers
     @Query("SELECT * FROM cached_exam_papers ORDER BY year DESC, title ASC")
     fun observeAllExamPapers(): Flow<List<CachedExamPaperEntity>>
@@ -257,5 +266,37 @@ interface StudyHubDao {
     suspend fun replaceExamPapers(items: List<CachedExamPaperEntity>) {
         clearCachedExamPapers()
         if (items.isNotEmpty()) upsertExamPapers(items)
+    }
+
+    @Query("UPDATE cached_materials SET downloadedOffline = 0, downloadedAtMillis = 0")
+    suspend fun clearAllMaterialDownloads()
+
+    @Transaction
+    suspend fun replaceUserBookmarks(userId: String, items: List<CachedBookmarkEntity>) {
+        clearUserBookmarks(userId)
+        if (items.isNotEmpty()) upsertBookmarks(items)
+    }
+
+    @Transaction
+    suspend fun replaceUserQuizAttempts(userId: String, items: List<CachedQuizAttemptEntity>) {
+        clearUserQuizAttempts(userId)
+        if (items.isNotEmpty()) upsertQuizAttempts(items)
+    }
+
+    @Transaction
+    suspend fun replaceUserReadingProgress(userId: String, items: List<CachedReadingProgressEntity>) {
+        clearUserReadingProgress(userId)
+        if (items.isNotEmpty()) upsertReadingProgressList(items)
+    }
+
+    @Transaction
+    suspend fun replaceUserDownloads(userId: String, items: List<CachedDownloadEntity>) {
+        clearUserDownloads(userId)
+        clearAllMaterialDownloads()
+        if (items.isNotEmpty()) {
+            upsertDownloads(items)
+            val now = System.currentTimeMillis()
+            items.forEach { d -> setMaterialDownloaded(d.materialId, true, now) }
+        }
     }
 }

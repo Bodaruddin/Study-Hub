@@ -137,11 +137,11 @@ class StudyHubRepository(
                 selectedClass = 7L,
                 role = fallbackRole,
                 subscriptionTier = "free",
-                avgScore = 87L,
-                dayStreak = 15L,
-                points = 120L,
+                avgScore = 0L,
+                dayStreak = 0L,
+                points = 0L,
                 dailyGoalCount = 5L,
-                dailyCompletedCount = 3L,
+                dailyCompletedCount = 0L,
                 darkThemeEnabled = fallbackRole == "admin",
                 notificationsEnabled = true,
                 examRemindersEnabled = true,
@@ -302,7 +302,7 @@ class StudyHubRepository(
             val parsed = (0 until arr.length()).map { i ->
                 SupabaseMappers.announcementFromJson(arr.getJSONObject(i))
             }
-            return parsed.ifEmpty { SeedCurriculumData.defaultAnnouncements }
+            return parsed
         }
 
         emit(runCatching { fetchList() }.getOrElse {
@@ -870,6 +870,25 @@ class StudyHubRepository(
         }
     }
 
+    suspend fun deleteQuiz(quizId: String): Result<Unit> {
+        if (quizId.isBlank()) return Result.failure(IllegalArgumentException("Invalid quiz ID"))
+        return try {
+            requireAdmin()
+            if (supabase.isConfigured()) {
+                supabase.deleteWhere("quiz_questions", mapOf("quiz_id" to "eq.$quizId"))
+                supabase.deleteWhere("quizzes", mapOf("id" to "eq.$quizId"))
+            }
+            dao.deleteQuestionsByQuizId(quizId)
+            dao.deleteQuizById(quizId)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.DELETE, "quizzes/$quizId")
+            Result.failure(e)
+        }
+    }
+
     suspend fun addQuizQuestion(question: QuizQuestion): Result<Unit> {
         val qId = question.id.ifBlank { "q_${System.currentTimeMillis()}" }
         val path = "quiz_questions/$qId"
@@ -894,12 +913,42 @@ class StudyHubRepository(
                     )
                 )
             )
+            syncQuizQuestionCount(question.quizId)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             handleCloudError(e, OperationType.CREATE, path)
             Result.failure(e)
+        }
+    }
+
+    suspend fun deleteQuizQuestion(questionId: String, quizId: String): Result<Unit> {
+        if (questionId.isBlank()) return Result.failure(IllegalArgumentException("Invalid question ID"))
+        val res = deleteAdminRow("quiz_questions", questionId)
+        if (res.isSuccess) {
+            dao.deleteQuestionById(questionId)
+            syncQuizQuestionCount(quizId)
+        }
+        return res
+    }
+
+    private suspend fun syncQuizQuestionCount(quizId: String) {
+        if (quizId.isBlank()) return
+        runCatching {
+            val count = dao.getQuestionsForQuizOnce(quizId).size.toLong()
+            val quiz = dao.observeAllQuizzes().first().firstOrNull { it.id == quizId } ?: return
+            dao.upsertQuizzes(listOf(quiz.copy(questionCount = count)))
+            if (supabase.isConfigured()) {
+                supabase.updateWhere(
+                    table = "quizzes",
+                    filters = mapOf("id" to "eq.$quizId"),
+                    bodyJson = JSONObject().apply {
+                        put("question_count", count)
+                        put("updated_at", SupabaseMappers.nowIso())
+                    }
+                )
+            }
         }
     }
 
@@ -1024,6 +1073,15 @@ class StudyHubRepository(
         }
     }
 
+    suspend fun deleteAnnouncement(announcementId: String): Result<Unit> {
+        if (announcementId.isBlank()) return Result.failure(IllegalArgumentException("Invalid announcement ID"))
+        val res = deleteAdminRow("announcements", announcementId)
+        if (res.isSuccess) {
+            cloudRefreshTrigger.tryEmit(Unit)
+        }
+        return res
+    }
+
     suspend fun saveAppSettings(settings: AppSettings): Result<Unit> {
         val docId = "global"
         return try {
@@ -1054,6 +1112,112 @@ class StudyHubRepository(
             throw e
         } catch (e: Exception) {
             handleCloudError(e, OperationType.LIST, "user_profiles")
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun verifyModifiableStudent(adminUid: String, targetUid: String) {
+        require(targetUid.isNotBlank()) { "Invalid student ID." }
+        if (targetUid == adminUid) {
+            throw SecurityException("You cannot block or delete your own active admin account.")
+        }
+        if (supabase.isConfigured()) {
+            val rows = supabase.select("user_profiles", mapOf("id" to "eq.$targetUid"), limit = 1)
+            if (rows.length() > 0) {
+                val target = SupabaseMappers.userProfileFromJson(rows.getJSONObject(0))
+                if (target.role == "admin" || BOOTSTRAP_ADMIN_EMAILS.any { it.equals(target.email, ignoreCase = true) }) {
+                    throw SecurityException("Admin accounts cannot be blocked or deleted.")
+                }
+            }
+        }
+    }
+
+    suspend fun adminSetUserBlocked(targetUid: String, blocked: Boolean): Result<Unit> {
+        return try {
+            val adminUid = requireAdmin()
+            verifyModifiableStudent(adminUid, targetUid)
+            if (supabase.isConfigured()) {
+                val payload = JSONObject().apply {
+                    put("blocked", blocked)
+                    put("updated_at", SupabaseMappers.nowIso())
+                }
+                supabase.updateWhere("user_profiles", mapOf("id" to "eq.$targetUid"), payload)
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SupabaseApiException) {
+            handleCloudError(e, OperationType.UPDATE, "user_profiles/$targetUid")
+            if (e.statusCode == 400) {
+                Result.failure(IllegalStateException("Run the updated SQL schema in Manage Database → Setup Supabase to add the blocked column."))
+            } else {
+                Result.failure(e)
+            }
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.UPDATE, "user_profiles/$targetUid")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun adminUpdateStudent(
+        targetUid: String,
+        displayName: String,
+        selectedClass: Long,
+        subscriptionTier: String,
+        blocked: Boolean
+    ): Result<Unit> {
+        return try {
+            val adminUid = requireAdmin()
+            require(targetUid.isNotBlank()) { "Invalid student ID." }
+            if (blocked) {
+                verifyModifiableStudent(adminUid, targetUid)
+            }
+            if (supabase.isConfigured()) {
+                val payload = SupabaseMappers.adminStudentUpdateJson(
+                    displayName = displayName,
+                    selectedClass = selectedClass,
+                    subscriptionTier = subscriptionTier,
+                    blocked = blocked
+                )
+                supabase.updateWhere("user_profiles", mapOf("id" to "eq.$targetUid"), payload)
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SupabaseApiException) {
+            handleCloudError(e, OperationType.UPDATE, "user_profiles/$targetUid")
+            if (e.statusCode == 400) {
+                Result.failure(IllegalStateException("Run the updated SQL schema in Manage Database → Setup Supabase to enable all student fields."))
+            } else {
+                Result.failure(e)
+            }
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.UPDATE, "user_profiles/$targetUid")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun adminDeleteStudent(targetUid: String): Result<Unit> {
+        return try {
+            val adminUid = requireAdmin()
+            verifyModifiableStudent(adminUid, targetUid)
+            if (supabase.isConfigured()) {
+                val userFilter = mapOf("user_id" to "eq.$targetUid")
+                listOf("bookmarks", "quiz_attempts", "reading_progress", "downloads").forEach { table ->
+                    supabase.deleteWhere(table, userFilter)
+                }
+                supabase.deleteWhere("user_profiles", mapOf("id" to "eq.$targetUid"))
+            }
+            dao.clearUserBookmarks(targetUid)
+            dao.clearUserQuizAttempts(targetUid)
+            dao.clearUserReadingProgress(targetUid)
+            dao.clearUserDownloads(targetUid)
+            dao.clearUserPendingSync(targetUid)
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleCloudError(e, OperationType.DELETE, "user_profiles/$targetUid")
             Result.failure(e)
         }
     }

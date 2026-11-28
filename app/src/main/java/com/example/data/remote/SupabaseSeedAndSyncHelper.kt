@@ -169,6 +169,7 @@ class SupabaseSeedAndSyncHelper(
         if (!supabase.isConfigured()) return Result.success(Unit)
         return try {
             val userFilter = mapOf("user_id" to "eq.$uid")
+            val hasPendingSync = dao.getPendingSyncOnce(uid).isNotEmpty()
 
             val bookmarksArr = supabase.select("bookmarks", userFilter)
             val bookmarks = (0 until bookmarksArr.length()).map { i ->
@@ -183,10 +184,14 @@ class SupabaseSeedAndSyncHelper(
                     materialType = b.materialType,
                     subtitle = b.subtitle,
                     accentKey = b.accentKey,
-                    savedAtMillis = SupabaseMappers.parseIsoToMillis(b.updatedAt)
+                    savedAtMillis = SupabaseMappers.parseIsoToMillis(b.updatedAt ?: b.createdAt)
                 )
             }
-            if (bookmarks.isNotEmpty()) dao.upsertBookmarks(bookmarks)
+            if (!hasPendingSync) {
+                dao.replaceUserBookmarks(uid, bookmarks)
+            } else if (bookmarks.isNotEmpty()) {
+                dao.upsertBookmarks(bookmarks)
+            }
 
             val attemptsArr = supabase.select("quiz_attempts", userFilter)
             val attempts = (0 until attemptsArr.length()).map { i ->
@@ -204,10 +209,14 @@ class SupabaseSeedAndSyncHelper(
                     scorePercent = a.scorePercent,
                     durationSeconds = a.durationSeconds,
                     pointsEarned = a.pointsEarned,
-                    attemptedAtMillis = SupabaseMappers.parseIsoToMillis(a.createdAt)
+                    attemptedAtMillis = a.attemptedAtMillis
                 )
             }
-            if (attempts.isNotEmpty()) dao.upsertQuizAttempts(attempts)
+            if (!hasPendingSync) {
+                dao.replaceUserQuizAttempts(uid, attempts)
+            } else if (attempts.isNotEmpty()) {
+                dao.upsertQuizAttempts(attempts)
+            }
 
             val progressArr = supabase.select("reading_progress", userFilter)
             val progress = (0 until progressArr.length()).map { i ->
@@ -221,10 +230,14 @@ class SupabaseSeedAndSyncHelper(
                     chapterTitle = p.chapterTitle,
                     classGrade = p.classGrade,
                     progressPercent = p.progressPercent,
-                    updatedAtMillis = SupabaseMappers.parseIsoToMillis(p.updatedAt)
+                    updatedAtMillis = p.updatedAtMillis
                 )
             }
-            if (progress.isNotEmpty()) dao.upsertReadingProgressList(progress)
+            if (!hasPendingSync) {
+                dao.replaceUserReadingProgress(uid, progress)
+            } else if (progress.isNotEmpty()) {
+                dao.upsertReadingProgressList(progress)
+            }
 
             val downloadsArr = supabase.select("downloads", userFilter)
             val downloads = (0 until downloadsArr.length()).map { i ->
@@ -237,10 +250,12 @@ class SupabaseSeedAndSyncHelper(
                     subjectName = d.subjectName,
                     classGrade = d.classGrade,
                     fileSizeLabel = d.fileSizeLabel,
-                    downloadedAtMillis = SupabaseMappers.parseIsoToMillis(d.updatedAt)
+                    downloadedAtMillis = SupabaseMappers.parseIsoToMillis(d.updatedAt ?: d.createdAt)
                 )
             }
-            if (downloads.isNotEmpty()) {
+            if (!hasPendingSync) {
+                dao.replaceUserDownloads(uid, downloads)
+            } else if (downloads.isNotEmpty()) {
                 dao.upsertDownloads(downloads)
                 downloads.forEach { d -> dao.setMaterialDownloaded(d.materialId, true, System.currentTimeMillis()) }
             }

@@ -31,13 +31,18 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Publish
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Unpublished
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -104,6 +109,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AdminSubmoduleScaffold(
     module: AdminModule,
+    currentAdminUid: String,
     classes: List<SchoolClass>,
     subjects: List<SubjectItem>,
     chapters: List<ChapterItem>,
@@ -122,8 +128,13 @@ fun AdminSubmoduleScaffold(
     onOpenDrawer: () -> Unit,
     onNavigateModule: (AdminModule) -> Unit,
     onOpenAddClass: () -> Unit,
+    onEditClass: (SchoolClass) -> Unit,
+    onTogglePublishClass: (SchoolClass) -> Unit,
     onDeleteClass: (String) -> Unit,
     onOpenAddSubject: () -> Unit,
+    onEditSubject: (SubjectItem) -> Unit,
+    onTogglePublishSubject: (SubjectItem) -> Unit,
+    onDeleteSubject: (String) -> Unit,
     onSaveChapter: (ChapterItem, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishChapter: (ChapterItem) -> Unit,
     onDeleteChapter: (String) -> Unit,
@@ -131,13 +142,25 @@ fun AdminSubmoduleScaffold(
     onEditMaterial: (StudyMaterial) -> Unit,
     onTogglePublishMaterial: (StudyMaterial) -> Unit,
     onDeleteMaterial: (String) -> Unit,
-    onOpenAddMcq: () -> Unit,
+    onOpenAddMcq: (String?) -> Unit,
+    onEditQuestion: (QuizQuestion) -> Unit,
+    onDeleteQuestion: (String, String) -> Unit,
     onOpenCreateQuiz: () -> Unit,
+    onEditQuiz: (QuizItem) -> Unit,
+    onTogglePublishQuiz: (QuizItem) -> Unit,
+    onDeleteQuiz: (String) -> Unit,
     onSaveExamPaper: (ExamPaper, Boolean, List<PaperAttachmentDraft>, (Boolean) -> Unit) -> Unit,
     onTogglePublishExamPaper: (ExamPaper) -> Unit,
     onDeleteExamPaper: (String) -> Unit,
     onLoadAttachments: suspend (String) -> Result<List<ResolvedPaperAttachment>>,
     onOpenAnnouncementDialog: () -> Unit,
+    onEditAnnouncement: (AnnouncementItem) -> Unit,
+    onTogglePublishAnnouncement: (AnnouncementItem) -> Unit,
+    onDeleteAnnouncement: (String) -> Unit,
+    onRefreshStudents: () -> Unit,
+    onUpdateStudent: (UserProfile, String, Long, String, Boolean) -> Unit,
+    onSetStudentBlocked: (UserProfile, Boolean) -> Unit,
+    onDeleteStudent: (UserProfile) -> Unit,
     onSaveAppSettings: (AppSettings) -> Unit,
     onSyncCloudNow: () -> Unit,
     onSeedMissingCloud: () -> Unit,
@@ -152,6 +175,51 @@ fun AdminSubmoduleScaffold(
     var editingPaper by remember { mutableStateOf<ExamPaper?>(null) }
     var showChapterDialog by remember { mutableStateOf(false) }
     var editingChapter by remember { mutableStateOf<ChapterItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<Triple<String, String, () -> Unit>?>(null) }
+    var editingStudent by remember { mutableStateOf<UserProfile?>(null) }
+    var pendingBlockStudent by remember { mutableStateOf<UserProfile?>(null) }
+    var studentSearchQuery by remember { mutableStateOf("") }
+    var studentFilterMode by remember { mutableStateOf("All") }
+    var expandedQuizIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    pendingDelete?.let { (delTitle, delMsg, onConfirm) ->
+        AdminConfirmDeleteDialog(
+            title = delTitle,
+            message = delMsg,
+            onDismiss = { pendingDelete = null },
+            onConfirm = {
+                pendingDelete = null
+                onConfirm()
+            }
+        )
+    }
+
+    editingStudent?.let { targetStudent ->
+        val uid = targetStudent.id.ifBlank { targetStudent.userId }
+        val canBlockOrDelete = targetStudent.role != "admin" && uid != currentAdminUid
+        AdminEditStudentDialog(
+            student = targetStudent,
+            canBlockOrDelete = canBlockOrDelete,
+            onDismiss = { editingStudent = null },
+            onSave = { name, grade, tier, blocked ->
+                onUpdateStudent(targetStudent, name, grade, tier, blocked)
+                editingStudent = null
+            }
+        )
+    }
+
+    pendingBlockStudent?.let { targetStudent ->
+        AdminConfirmDeleteDialog(
+            title = "Block Student?",
+            message = "${targetStudent.displayName} (${targetStudent.email}) will be blocked from accessing StudyHub until unblocked.",
+            confirmLabel = "Block Student",
+            onDismiss = { pendingBlockStudent = null },
+            onConfirm = {
+                pendingBlockStudent = null
+                onSetStudentBlocked(targetStudent, true)
+            }
+        )
+    }
 
     if (showChapterDialog || editingChapter != null) {
         val targetChapter = editingChapter
@@ -311,15 +379,28 @@ fun AdminSubmoduleScaffold(
             when (module) {
                 AdminModule.CLASSES -> {
                     item {
-                        AdminActionHeader("Classes (6–12)", "Add Class", onOpenAddClass)
+                        AdminActionHeader("Classes (${classes.size})", "Add Class", onOpenAddClass)
                     }
                     items(classes, key = { it.id }) { c ->
+                        val registeredInClass = adminUsers.count { it.role != "admin" && it.selectedClass == c.grade }
                         AdminDarkRowCard(
                             title = c.name,
-                            subtitle = "${c.studentCount} students • ${c.description}",
+                            subtitle = "$registeredInClass student(s) • ${c.description}",
                             badge = if (c.published) "Published" else "Draft",
+                            onClick = { onEditClass(c) },
+                            editTag = "edit_class_${c.id}",
+                            onEdit = { onEditClass(c) },
+                            publishTag = "publish_class_${c.id}",
+                            isPublished = c.published,
+                            onTogglePublish = { onTogglePublishClass(c) },
                             deleteTag = "delete_class_${c.id}",
-                            onDelete = { onDeleteClass(c.id) }
+                            onDelete = {
+                                pendingDelete = Triple(
+                                    "Delete ${c.name}?",
+                                    "This removes ${c.name} from the classes catalog.",
+                                    { onDeleteClass(c.id) }
+                                )
+                            }
                         )
                     }
                 }
@@ -332,7 +413,21 @@ fun AdminSubmoduleScaffold(
                         AdminDarkRowCard(
                             title = "Class ${s.classGrade} • ${s.name}",
                             subtitle = s.subtitle,
-                            badge = if (s.published) "Published" else "Draft"
+                            badge = if (s.published) "Published" else "Draft",
+                            onClick = { onEditSubject(s) },
+                            editTag = "edit_subject_${s.id}",
+                            onEdit = { onEditSubject(s) },
+                            publishTag = "publish_subject_${s.id}",
+                            isPublished = s.published,
+                            onTogglePublish = { onTogglePublishSubject(s) },
+                            deleteTag = "delete_subject_${s.id}",
+                            onDelete = {
+                                pendingDelete = Triple(
+                                    "Delete Subject?",
+                                    "Delete ${s.name} (Class ${s.classGrade}) permanently?",
+                                    { onDeleteSubject(s.id) }
+                                )
+                            }
                         )
                     }
                 }
@@ -413,7 +508,13 @@ fun AdminSubmoduleScaffold(
                                     )
                                 }
                                 IconButton(
-                                    onClick = { onDeleteChapter(ch.id) },
+                                    onClick = {
+                                        pendingDelete = Triple(
+                                            "Delete Chapter?",
+                                            "Delete \"${ch.title}\" and its attachments?",
+                                            { onDeleteChapter(ch.id) }
+                                        )
+                                    },
                                     modifier = Modifier.testTag("delete_chapter_${ch.id}")
                                 ) {
                                     Icon(
@@ -480,7 +581,16 @@ fun AdminSubmoduleScaffold(
                                         tint = if (m.published) GreenStart else OrangeStart
                                     )
                                 }
-                                IconButton(onClick = { onDeleteMaterial(m.id) }) {
+                                IconButton(
+                                    onClick = {
+                                        pendingDelete = Triple(
+                                            "Delete Study Material?",
+                                            "Delete \"${m.title}\" and any attached files?",
+                                            { onDeleteMaterial(m.id) }
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("delete_material_${m.id}")
+                                ) {
                                     Icon(Icons.Rounded.Delete, contentDescription = "Delete", tint = DangerRed)
                                 }
                             }
@@ -500,7 +610,9 @@ fun AdminSubmoduleScaffold(
                                 floatingLift = 3.5.dp,
                                 glassGlossAlpha = 1.0f,
                                 onClick = onOpenCreateQuiz,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("create_quiz_btn")
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -519,8 +631,10 @@ fun AdminSubmoduleScaffold(
                                 depthHeight = 3.5.dp,
                                 floatingLift = 3.5.dp,
                                 glassGlossAlpha = 1.0f,
-                                onClick = onOpenAddMcq,
-                                modifier = Modifier.weight(1f)
+                                onClick = { onOpenAddMcq(null) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("add_mcq_btn")
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -534,12 +648,186 @@ fun AdminSubmoduleScaffold(
                         }
                     }
                     items(quizzes, key = { it.id }) { q ->
-                        val count = questions.count { it.quizId == q.id }
-                        AdminDarkRowCard(
-                            title = q.title,
-                            subtitle = "Class ${q.classGrade} • ${q.subjectName} • $count Questions • ${q.durationMinutes} min",
-                            badge = if (q.published) "Live" else "Draft"
-                        )
+                        val quizQuestions = questions.filter { it.quizId == q.id }
+                        val isExpanded = q.id in expandedQuizIds
+                        Tactile3DCard(
+                            faceBrush = Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF1D2761).copy(alpha = 0.94f),
+                                    Color(0xFF11173D).copy(alpha = 0.96f)
+                                )
+                            ),
+                            depthColor = Color(0xFF070B21),
+                            shadowColor = Color(0xFF05081A),
+                            highlightBorderColor = Color.White.copy(alpha = 0.28f),
+                            borderEndColor = NavyCardBorder,
+                            cornerRadius = 18.dp,
+                            depthHeight = 4.dp,
+                            floatingLift = 4.dp,
+                            glassGlossAlpha = 0.65f,
+                            onClick = {
+                                expandedQuizIds = if (isExpanded) expandedQuizIds - q.id else expandedQuizIds + q.id
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(
+                                                text = q.title,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (q.published) GreenStart.copy(alpha = 0.2f) else OrangeStart.copy(alpha = 0.2f)
+                                            ) {
+                                                Text(
+                                                    text = if (q.published) "Live" else "Draft",
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (q.published) Color(0xFF9BF6C6) else Color(0xFFFFD8A8),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = "Class ${q.classGrade} • ${q.subjectName} • ${quizQuestions.size} Questions • ${q.durationMinutes} min",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF9AA5D1)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onEditQuiz(q) },
+                                        modifier = Modifier.testTag("edit_quiz_${q.id}")
+                                    ) {
+                                        Icon(Icons.Rounded.Edit, contentDescription = "Edit quiz", tint = Color(0xFFC5A6FF))
+                                    }
+                                    IconButton(
+                                        onClick = { onTogglePublishQuiz(q) },
+                                        modifier = Modifier.testTag("publish_quiz_${q.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (q.published) Icons.Rounded.Publish else Icons.Rounded.Unpublished,
+                                            contentDescription = "Toggle quiz live status",
+                                            tint = if (q.published) GreenStart else OrangeStart
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            pendingDelete = Triple(
+                                                "Delete Quiz?",
+                                                "Delete \"${q.title}\" and its ${quizQuestions.size} question(s)?",
+                                                { onDeleteQuiz(q.id) }
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("delete_quiz_${q.id}")
+                                    ) {
+                                        Icon(Icons.Rounded.Delete, contentDescription = "Delete quiz", tint = DangerRed)
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            expandedQuizIds = if (isExpanded) expandedQuizIds - q.id else expandedQuizIds + q.id
+                                        },
+                                        modifier = Modifier.testTag("toggle_questions_${q.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                            contentDescription = null,
+                                            tint = Color(0xFFC5A6FF),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isExpanded) "Hide Questions (${quizQuestions.size})" else "Manage Questions (${quizQuestions.size})",
+                                            color = Color(0xFFC5A6FF),
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = { onOpenAddMcq(q.id) },
+                                        modifier = Modifier.testTag("add_question_to_${q.id}")
+                                    ) {
+                                        Icon(Icons.Rounded.Add, contentDescription = null, tint = GreenStart, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Add Question", color = Color(0xFF9BF6C6), style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+
+                                if (isExpanded) {
+                                    HorizontalDivider(color = NavyCardBorder, modifier = Modifier.padding(vertical = 6.dp))
+                                    if (quizQuestions.isEmpty()) {
+                                        Text(
+                                            text = "No questions yet. Tap Add Question above.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF9AA5D1),
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    } else {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            quizQuestions.forEachIndexed { idx, qq ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(NavyCard.copy(alpha = 0.85f))
+                                                        .border(1.dp, NavyCardBorder, RoundedCornerShape(12.dp))
+                                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = "Q${idx + 1}. ${qq.prompt}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = Color.White,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "${qq.options.size} options • ${qq.points} pts",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = Color(0xFF9AA5D1)
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = { onEditQuestion(qq) },
+                                                        modifier = Modifier.testTag("edit_question_${qq.id}")
+                                                    ) {
+                                                        Icon(Icons.Rounded.Edit, contentDescription = "Edit question", tint = Color(0xFFC5A6FF), modifier = Modifier.size(18.dp))
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            pendingDelete = Triple(
+                                                                "Delete Question?",
+                                                                "Remove this question from \"${q.title}\"?",
+                                                                { onDeleteQuestion(qq.id, q.id) }
+                                                            )
+                                                        },
+                                                        modifier = Modifier.testTag("delete_question_${qq.id}")
+                                                    ) {
+                                                        Icon(Icons.Rounded.Delete, contentDescription = "Delete question", tint = DangerRed, modifier = Modifier.size(18.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -609,7 +897,13 @@ fun AdminSubmoduleScaffold(
                                     )
                                 }
                                 IconButton(
-                                    onClick = { onDeleteExamPaper(ep.id) },
+                                    onClick = {
+                                        pendingDelete = Triple(
+                                            "Delete Exam Paper?",
+                                            "Delete \"${ep.title}\" and its attachments?",
+                                            { onDeleteExamPaper(ep.id) }
+                                        )
+                                    },
                                     modifier = Modifier.testTag("delete_paper_${ep.id}")
                                 ) {
                                     Icon(
@@ -623,23 +917,30 @@ fun AdminSubmoduleScaffold(
                     }
                 }
 
-                AdminModule.STUDENTS -> {
-                    item {
-                        Text(
-                            text = "Registered Students & Users (${adminUsers.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
+                AdminModule.STUDENTS -> adminManageStudentsItems(
+                    adminUsers = adminUsers,
+                    currentAdminUid = currentAdminUid,
+                    searchQuery = studentSearchQuery,
+                    filterMode = studentFilterMode,
+                    onSearchChange = { studentSearchQuery = it },
+                    onFilterChange = { studentFilterMode = it },
+                    onRefreshStudents = onRefreshStudents,
+                    onEditStudent = { editingStudent = it },
+                    onRequestBlockToggle = { student ->
+                        if (student.blocked) {
+                            onSetStudentBlocked(student, false)
+                        } else {
+                            pendingBlockStudent = student
+                        }
+                    },
+                    onRequestDeleteStudent = { student ->
+                        pendingDelete = Triple(
+                            "Delete Student Account?",
+                            "Permanently delete ${student.displayName} (${student.email}) and all their progress, bookmarks, and quiz attempts?",
+                            { onDeleteStudent(student) }
                         )
                     }
-                    items(adminUsers, key = { it.userId }) { u ->
-                        AdminDarkRowCard(
-                            title = u.displayName,
-                            subtitle = "${u.email} • Class ${u.selectedClass} • ${u.points} pts • ${u.avgScore}% avg",
-                            badge = u.role.uppercase()
-                        )
-                    }
-                }
+                )
 
                 AdminModule.ANNOUNCEMENTS -> {
                     item {
@@ -648,8 +949,26 @@ fun AdminSubmoduleScaffold(
                     items(announcements, key = { it.id }) { a ->
                         AdminDarkRowCard(
                             title = a.title,
-                            subtitle = a.message,
-                            badge = if (a.priority == "high") "URGENT" else "NORMAL"
+                            subtitle = "${if (a.targetClass == 0L) "All Classes" else "Class ${a.targetClass}"} • ${a.message}",
+                            badge = when {
+                                !a.published -> "DRAFT"
+                                a.priority == "high" -> "URGENT"
+                                else -> "NORMAL"
+                            },
+                            onClick = { onEditAnnouncement(a) },
+                            editTag = "edit_announcement_${a.id}",
+                            onEdit = { onEditAnnouncement(a) },
+                            publishTag = "publish_announcement_${a.id}",
+                            isPublished = a.published,
+                            onTogglePublish = { onTogglePublishAnnouncement(a) },
+                            deleteTag = "delete_announcement_${a.id}",
+                            onDelete = {
+                                pendingDelete = Triple(
+                                    "Delete Announcement?",
+                                    "Remove announcement \"${a.title}\"?",
+                                    { onDeleteAnnouncement(a.id) }
+                                )
+                            }
                         )
                     }
                 }
@@ -659,15 +978,76 @@ fun AdminSubmoduleScaffold(
                         AdminDarkRowCard(
                             title = "Curriculum Coverage",
                             subtitle = "${classes.size} Classes • ${subjects.size} Subjects • ${chapters.size} Chapters • ${materials.size} Materials",
-                            badge = "ACTIVE"
+                            badge = "ACTIVE",
+                            onClick = { onNavigateModule(AdminModule.SUBJECTS) },
+                            editTag = "analytics_edit_curriculum",
+                            onEdit = { onNavigateModule(AdminModule.SUBJECTS) }
                         )
                     }
                     item {
                         AdminDarkRowCard(
                             title = "Assessment Bank",
                             subtitle = "${quizzes.size} Quizzes • ${questions.size} Questions • ${examPapers.size} Exam Papers",
-                            badge = "VERIFIED"
+                            badge = "VERIFIED",
+                            onClick = { onNavigateModule(AdminModule.QUIZZES) },
+                            editTag = "analytics_edit_quizzes",
+                            onEdit = { onNavigateModule(AdminModule.QUIZZES) }
                         )
+                    }
+                    item {
+                        val studentTotal = adminUsers.count { it.role != "admin" }
+                        val blockedTotal = adminUsers.count { it.blocked }
+                        AdminDarkRowCard(
+                            title = "Student Directory",
+                            subtitle = "$studentTotal Students • $blockedTotal Blocked • ${announcements.size} Announcements",
+                            badge = "USERS",
+                            onClick = { onNavigateModule(AdminModule.STUDENTS) },
+                            editTag = "analytics_manage_students",
+                            onEdit = { onNavigateModule(AdminModule.STUDENTS) }
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { onNavigateModule(AdminModule.CLASSES) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Classes", color = Color(0xFFC5A6FF), maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { onNavigateModule(AdminModule.CHAPTERS) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Chapters", color = Color(0xFFC5A6FF), maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { onNavigateModule(AdminModule.PAPERS) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Papers", color = Color(0xFFC5A6FF), maxLines = 1)
+                            }
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { onNavigateModule(AdminModule.STUDENTS) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.Group, contentDescription = null, tint = Color(0xFFC5A6FF), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Manage Students", color = Color(0xFFC5A6FF), maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = onSyncCloudNow,
+                                enabled = !isDatabaseBusy,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.Sync, contentDescription = null, tint = GreenStart, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sync Cloud", color = Color(0xFF9BF6C6), maxLines = 1)
+                            }
+                        }
                     }
                 }
 
@@ -788,8 +1168,11 @@ fun AdminSubmoduleScaffold(
                     item {
                         AdminDarkRowCard(
                             title = "Content Moderation & Reports",
-                            subtitle = "0 open student reports • All curriculum materials adhere to age-appropriate educational standards.",
-                            badge = "CLEAN"
+                            subtitle = "${adminUsers.count { it.blocked }} blocked accounts • Tap Manage Students to review or block users.",
+                            badge = "ACTIVE",
+                            onClick = { onNavigateModule(AdminModule.STUDENTS) },
+                            editTag = "support_manage_students",
+                            onEdit = { onNavigateModule(AdminModule.STUDENTS) }
                         )
                     }
                     item {
@@ -876,6 +1259,12 @@ private fun AdminDarkRowCard(
     title: String,
     subtitle: String,
     badge: String,
+    onClick: (() -> Unit)? = null,
+    editTag: String = "admin_row_edit",
+    onEdit: (() -> Unit)? = null,
+    publishTag: String = "admin_row_publish",
+    isPublished: Boolean = true,
+    onTogglePublish: (() -> Unit)? = null,
     deleteTag: String = "admin_row_delete",
     onDelete: (() -> Unit)? = null
 ) {
@@ -894,6 +1283,7 @@ private fun AdminDarkRowCard(
         depthHeight = 4.dp,
         floatingLift = 4.dp,
         glassGlossAlpha = 0.65f,
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -905,7 +1295,7 @@ private fun AdminDarkRowCard(
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFF9AA5D1))
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
@@ -918,11 +1308,31 @@ private fun AdminDarkRowCard(
             ) {
                 Text(
                     text = badge,
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFC5A6FF),
                     fontWeight = FontWeight.Bold
                 )
+            }
+            if (onEdit != null) {
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.testTag(editTag)
+                ) {
+                    Icon(Icons.Rounded.Edit, contentDescription = "Edit $title", tint = Color(0xFFC5A6FF))
+                }
+            }
+            if (onTogglePublish != null) {
+                IconButton(
+                    onClick = onTogglePublish,
+                    modifier = Modifier.testTag(publishTag)
+                ) {
+                    Icon(
+                        imageVector = if (isPublished) Icons.Rounded.Publish else Icons.Rounded.Unpublished,
+                        contentDescription = if (isPublished) "Published (tap to draft)" else "Draft (tap to publish)",
+                        tint = if (isPublished) GreenStart else OrangeStart
+                    )
+                }
             }
             if (onDelete != null) {
                 IconButton(
@@ -934,58 +1344,6 @@ private fun AdminDarkRowCard(
             }
         }
     }
-}
-
-@Composable
-fun AdminAddClassDialog(onDismiss: () -> Unit, onSave: (SchoolClass) -> Unit) {
-    var gradeText by remember { mutableStateOf("7") }
-    var name by remember { mutableStateOf("Class 7") }
-    var desc by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add / Update Class") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = gradeText, onValueChange = { gradeText = it }, label = { Text("Grade (6–12)") })
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Class Name") })
-                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Description") })
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val grade = (gradeText.toLongOrNull() ?: 7L).coerceIn(6L, 12L)
-                onSave(SchoolClass(id = "class_$grade", grade = grade, name = name.ifBlank { "Class $grade" }, description = desc, studentCount = 1200L, published = true))
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-fun AdminAddSubjectDialog(onDismiss: () -> Unit, onSave: (SubjectItem) -> Unit) {
-    var gradeText by remember { mutableStateOf("7") }
-    var name by remember { mutableStateOf("") }
-    var subtitle by remember { mutableStateOf("Notes • Summary • MCQs") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Subject") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = gradeText, onValueChange = { gradeText = it }, label = { Text("Class Grade (6–12)") })
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Subject Name") })
-                OutlinedTextField(value = subtitle, onValueChange = { subtitle = it }, label = { Text("Subtitle") })
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (name.isNotBlank()) {
-                    val grade = (gradeText.toLongOrNull() ?: 7L).coerceIn(6L, 12L)
-                    onSave(SubjectItem(classGrade = grade, name = name.trim(), subtitle = subtitle.trim(), iconKey = "book", colorKey = "blue", chapterCount = 4L, published = true))
-                }
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 @Composable
@@ -1850,167 +2208,5 @@ fun AdminUploadMaterialDialog(
         dismissButton = {
             TextButton(enabled = !isSaving, onClick = onDismiss) { Text("Cancel") }
         }
-    )
-}
-
-@Composable
-fun AdminAddMcqDialog(
-    quizzes: List<QuizItem>,
-    onDismiss: () -> Unit,
-    onSave: (QuizQuestion) -> Unit
-) {
-    var selectedQuizId by remember { mutableStateOf(quizzes.firstOrNull()?.id ?: "quiz_eng_7_tenses") }
-    var prompt by remember { mutableStateOf("") }
-    var optA by remember { mutableStateOf("") }
-    var optB by remember { mutableStateOf("") }
-    var optC by remember { mutableStateOf("") }
-    var optD by remember { mutableStateOf("") }
-    var correctIdx by remember { mutableStateOf("0") }
-    var explanation by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add MCQ Question") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    quizzes.forEach { q ->
-                        Surface(
-                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { selectedQuizId = q.id },
-                            color = if (selectedQuizId == q.id) ElectricPurple else MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(q.title, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp), color = if (selectedQuizId == q.id) Color.White else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-                OutlinedTextField(value = prompt, onValueChange = { prompt = it }, label = { Text("Question Prompt") })
-                OutlinedTextField(value = optA, onValueChange = { optA = it }, label = { Text("Option 1 (Index 0)") })
-                OutlinedTextField(value = optB, onValueChange = { optB = it }, label = { Text("Option 2 (Index 1)") })
-                OutlinedTextField(value = optC, onValueChange = { optC = it }, label = { Text("Option 3 (Index 2)") })
-                OutlinedTextField(value = optD, onValueChange = { optD = it }, label = { Text("Option 4 (Index 3)") })
-                OutlinedTextField(value = correctIdx, onValueChange = { correctIdx = it }, label = { Text("Correct Index (0–3)") })
-                OutlinedTextField(value = explanation, onValueChange = { explanation = it }, label = { Text("Explanation") })
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val opts = listOf(optA, optB, optC, optD).filter { it.isNotBlank() }
-                if (prompt.isNotBlank() && opts.size >= 2) {
-                    val idx = (correctIdx.toLongOrNull() ?: 0L).coerceIn(0L, (opts.size - 1).toLong())
-                    onSave(
-                        QuizQuestion(
-                            quizId = selectedQuizId,
-                            questionType = QuestionType.MCQ.key,
-                            prompt = prompt.trim(),
-                            options = opts,
-                            correctIndices = listOf(idx),
-                            correctText = "",
-                            explanation = explanation.ifBlank { "Correct option is #${idx + 1}." },
-                            points = 20L,
-                            published = true
-                        )
-                    )
-                }
-            }) { Text("Add MCQ") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-fun AdminCreateQuizDialog(
-    subjects: List<SubjectItem>,
-    chapters: List<ChapterItem>,
-    onDismiss: () -> Unit,
-    onSave: (QuizItem, QuizQuestion?) -> Unit
-) {
-    var title by remember { mutableStateOf("") }
-    var duration by remember { mutableStateOf("10") }
-    var firstPrompt by remember { mutableStateOf("") }
-    var opt1 by remember { mutableStateOf("Option A") }
-    var opt2 by remember { mutableStateOf("Option B") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Practice Test") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Test Title") })
-                OutlinedTextField(value = duration, onValueChange = { duration = it }, label = { Text("Duration (minutes)") })
-                OutlinedTextField(value = firstPrompt, onValueChange = { firstPrompt = it }, label = { Text("First Question (Optional)") })
-                OutlinedTextField(value = opt1, onValueChange = { opt1 = it }, label = { Text("Choice 1 (Correct)") })
-                OutlinedTextField(value = opt2, onValueChange = { opt2 = it }, label = { Text("Choice 2") })
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (title.isNotBlank()) {
-                    val subj = subjects.firstOrNull { it.classGrade == 7L }
-                    val chap = chapters.firstOrNull { it.classGrade == 7L }
-                    val quiz = QuizItem(
-                        classGrade = 7L,
-                        subjectId = subj?.id ?: "sub_english_7",
-                        subjectName = subj?.name ?: "English",
-                        chapterId = chap?.id ?: "chap_eng_7_1",
-                        chapterTitle = chap?.title ?: "Chapter 1",
-                        title = title.trim(),
-                        description = "Admin-created assessment",
-                        durationMinutes = (duration.toLongOrNull() ?: 10L).coerceIn(1L, 180L),
-                        questionCount = if (firstPrompt.isNotBlank()) 1L else 0L,
-                        premiumOnly = false,
-                        published = true
-                    )
-                    val q = if (firstPrompt.isNotBlank()) {
-                        QuizQuestion(
-                            quizId = "",
-                            questionType = QuestionType.MCQ.key,
-                            prompt = firstPrompt.trim(),
-                            options = listOf(opt1, opt2),
-                            correctIndices = listOf(0L),
-                            correctText = "",
-                            explanation = "Choice 1 is the correct answer.",
-                            points = 20L,
-                            published = true
-                        )
-                    } else null
-                    onSave(quiz, q)
-                }
-            }) { Text("Create") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-fun AdminAnnouncementDialog(
-    onDismiss: () -> Unit,
-    onSend: (String, String, Long, String) -> Unit
-) {
-    var title by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf("") }
-    var highPriority by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Send Announcement") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
-                OutlinedTextField(value = message, onValueChange = { message = it }, label = { Text("Message") }, minLines = 3)
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                    Text("High Priority Alert")
-                    Switch(checked = highPriority, onCheckedChange = { highPriority = it })
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (title.isNotBlank() && message.isNotBlank()) {
-                    onSend(title.trim(), message.trim(), 0L, if (highPriority) "high" else "normal")
-                }
-            }) { Text("Broadcast") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }

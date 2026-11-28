@@ -68,15 +68,16 @@ data class UserProfile(
     val selectedClass: Long = 7L,
     val role: String = "student",
     val subscriptionTier: String = "free",
-    val avgScore: Long = 87L,
-    val dayStreak: Long = 15L,
-    val points: Long = 120L,
+    val avgScore: Long = 0L,
+    val dayStreak: Long = 0L,
+    val points: Long = 0L,
     val dailyGoalCount: Long = 5L,
-    val dailyCompletedCount: Long = 3L,
+    val dailyCompletedCount: Long = 0L,
     val darkThemeEnabled: Boolean = false,
     val notificationsEnabled: Boolean = true,
     val examRemindersEnabled: Boolean = true,
     val newMaterialsEnabled: Boolean = true,
+    val blocked: Boolean = false,
     val createdAt: String? = null,
     val updatedAt: String? = null
 )
@@ -219,6 +220,7 @@ data class QuizAttemptRecord(
     val scorePercent: Long = 0L,
     val durationSeconds: Long = 0L,
     val pointsEarned: Long = 0L,
+    val attemptedAtMillis: Long = 0L,
     val createdAt: String? = null,
     val updatedAt: String? = null
 )
@@ -232,6 +234,7 @@ data class ReadingProgressRecord(
     val chapterTitle: String = "",
     val classGrade: Long = 7L,
     val progressPercent: Long = 0L,
+    val updatedAtMillis: Long = 0L,
     val createdAt: String? = null,
     val updatedAt: String? = null
 )

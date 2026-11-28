@@ -599,8 +599,11 @@ fun CircularProgressRing(
 fun PlatformAnalyticsLineChart(
     studentsSeries: List<Float>,
     quizzesSeries: List<Float>,
-    days: List<String> = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
-    peakLabel: String = "12.5K",
+    days: List<String> = listOf("C6", "C7", "C8", "C9", "C10", "C11", "C12"),
+    yAxisLabels: List<String> = listOf("3", "2", "1", "0"),
+    legend1Label: String = "Students",
+    legend2Label: String = "Content",
+    peakLabel: String = "Peak: 0",
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -616,7 +619,7 @@ fun PlatformAnalyticsLineChart(
                     .background(Color(0xFF9353FF))
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Students", style = MaterialTheme.typography.labelMedium, color = Color(0xFFD1D8F5))
+            Text(legend1Label, style = MaterialTheme.typography.labelMedium, color = Color(0xFFD1D8F5))
             Spacer(modifier = Modifier.width(20.dp))
             Box(
                 modifier = Modifier
@@ -625,7 +628,7 @@ fun PlatformAnalyticsLineChart(
                     .background(CyanAccent)
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Quizzes", style = MaterialTheme.typography.labelMedium, color = Color(0xFFD1D8F5))
+            Text(legend2Label, style = MaterialTheme.typography.labelMedium, color = Color(0xFFD1D8F5))
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -638,15 +641,16 @@ fun PlatformAnalyticsLineChart(
             Row(modifier = Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
-                        .width(34.dp)
+                        .width(40.dp)
                         .height(120.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    listOf("15K", "10K", "5K", "0").forEach { lbl ->
+                    yAxisLabels.forEach { lbl ->
                         Text(
                             text = lbl,
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF8C97C4)
+                            color = Color(0xFF8C97C4),
+                            maxLines = 1
                         )
                     }
                 }
@@ -719,14 +723,15 @@ fun PlatformAnalyticsLineChart(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .fillMaxWidth()
-                    .padding(start = 34.dp),
+                    .padding(start = 40.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 days.forEach { d ->
                     Text(
                         text = d,
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF9AA5D1)
+                        color = Color(0xFF9AA5D1),
+                        maxLines = 1
                     )
                 }
             }
